@@ -263,5 +263,4 @@ async def update_bot(client, message):
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
-    a
-pp.run()
+    app.run()
