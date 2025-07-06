@@ -32,14 +32,6 @@ async def web_server():
     web_app.add_routes(routes)
     return web_app
 
-ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-ssl_context.load_cert_chain(
-    '/etc/letsencrypt/live/yourdomain.com/fullchain.pem',
-    '/etc/letsencrypt/live/yourdomain.com/privkey.pem'
-)
-
-web.run_app(app, ssl_context=ssl_context, host="0.0.0.0", port=443)
-
 # ---------------- BOT INIT ---------------- #
 class Bot(Client):
     def __init__(self):
@@ -60,14 +52,25 @@ class Bot(Client):
         self.uptime = datetime.now()
         self.LOGGER(__name__).info(f"Bot Running...! @{self.username}")
 
+        # Initialize aiohttp HTTPS server
+        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_context.load_cert_chain(
+            '/etc/letsencrypt/live/yourdomain.com/fullchain.pem',
+            '/etc/letsencrypt/live/yourdomain.com/privkey.pem'
+        )
+
         runner = web.AppRunner(await web_server())
         await runner.setup()
-        await web.TCPSite(runner, "0.0.0.0", PORT).start()
+        site = web.TCPSite(runner, "0.0.0.0", 443, ssl_context=ssl_context)
+        await site.start()
 
         try:
-            await self.send_message(OWNER_ID, "<b><blockquote>Bot restarted.</blockquote></b>")
-        except:
-            pass
+            await self.send_message(
+                OWNER_ID,
+                "<b><blockquote>Bot restarted.</blockquote></b>"
+            )
+        except Exception as e:
+            self.LOGGER(__name__).warning(f"Failed to notify owner: {e}")
 
     async def stop(self):
         await super().stop()
@@ -79,9 +82,10 @@ class Bot(Client):
         try:
             loop.run_forever()
         except KeyboardInterrupt:
-            self.LOGGER(__name__).info("Interrupted.")
+            self.LOGGER(__name__).info("Interrupted by user.")
         finally:
             loop.run_until_complete(self.stop())
+
 
 app = Bot()
 
