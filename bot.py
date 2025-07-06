@@ -267,7 +267,6 @@ from pyrogram.types import Message
 from bs4 import BeautifulSoup
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
 import asyncio
 import time
 
@@ -286,38 +285,31 @@ async def bms_poster(client, message: Message):
         options.add_argument("--no-sandbox")
         options.add_argument("--window-size=1280,720")
 
-        # Optional: You can add your Chrome binary path like this:
-        # options.binary_location = "/usr/bin/google-chrome"
-
         browser = uc.Chrome(options=options)
         city = "chennai"
         browser.get(f"https://in.bookmyshow.com/explore/movies-{city}")
-        time.sleep(5)
+        time.sleep(6)
 
-        soup = BeautifulSoup(browser.page_source, "html.parser")
-        browser.quit()
+        # Let JS load and extract all cards
+        cards = browser.find_elements(By.CSS_SELECTOR, "a.__movie-card")
 
-        movie_cards = soup.select("a[href^='/movies/']")
         movie_url, movie_title = None, None
-
-        for card in movie_cards:
-            href = card.get("href")
-            title_tag = card.select_one("div.__name")
-            if not title_tag:
-                continue
-            title = title_tag.get_text(strip=True).lower()
+        for card in cards:
+            title_element = card.find_element(By.CSS_SELECTOR, "div.__name")
+            title = title_element.text.strip().lower()
             if query in title:
-                movie_url = f"https://in.bookmyshow.com{href}"
-                movie_title = title.title()
+                movie_url = card.get_attribute("href")
+                movie_title = title_element.text.strip()
                 break
 
         if not movie_url:
+            browser.quit()
             return await msg.edit("❌ Movie not found on BookMyShow.")
 
-        import cloudscraper
-        scraper = cloudscraper.create_scraper()
-        movie_page = scraper.get(movie_url).text
-        soup = BeautifulSoup(movie_page, "html.parser")
+        browser.get(movie_url)
+        time.sleep(4)
+        soup = BeautifulSoup(browser.page_source, "html.parser")
+        browser.quit()
 
         landscape = soup.find("meta", {"property": "og:image"})
         landscape_url = landscape["content"] if landscape else None
@@ -335,6 +327,7 @@ async def bms_poster(client, message: Message):
 
     except Exception as e:
         await msg.edit(f"❌ Error occurred:\n<code>{e}</code>")
+
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
