@@ -275,7 +275,7 @@ async def fetch_bms_posters(client, message: Message):
         from bs4 import BeautifulSoup
 
         scraper = cloudscraper.create_scraper()
-        city = "chennai"  # you can change this to mumbai, delhi, etc.
+        city = "delhi"  # you can change this to mumbai, delhi, etc.
         explore_url = f"https://in.bookmyshow.com/explore/movies-{city}"
         html = scraper.get(explore_url).text
 
