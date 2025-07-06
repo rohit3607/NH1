@@ -18,5 +18,8 @@ pillow
 aiofiles
 asyncio
 reportlab
-cloudscraper
 playwright 
+beautifulsoup4
+cloudscraper
+undetected-chromedriver
+selenium
