@@ -262,85 +262,52 @@ async def update_bot(client, message):
 
 # ---------------- POSTER ---------------- #
 
-from pyrogram import Client, filters
-from pyrogram.types import Message
+import aiohttp
 from bs4 import BeautifulSoup
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import cloudscraper
-import asyncio
+from pyrogram import filters
+from pyrogram.types import Message
+import re
 
-@app.on_message(filters.command("bms") & filters.private)
-async def bms_poster(client, message: Message):
-    if len(message.command) < 2:
-        return await message.reply("❌ Usage: /bms movie name", quote=True)
+BMS_SEARCH = "https://in.bookmyshow.com/explore/search?q="
 
-    query = " ".join(message.command[1:]).strip().lower()
-    msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
+@app.on_message(filters.command("bms"))
+async def bms_poster_fetcher(_, message: Message):
+    query = message.text.split(" ", maxsplit=1)[1] if len(message.command) > 1 else None
+    if not query:
+        return await message.reply("❗ Please provide a movie name.\n\nExample:\n`/bms Salaar`")
+
+    msg = await message.reply("🔍 Searching BookMyShow...")
 
     try:
-        city = "chennai"
-        url = f"https://in.bookmyshow.com/explore/movies-{city}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(BMS_SEARCH + query) as resp:
+                html = await resp.text()
 
-        # Setup undetected Chrome
-        options = uc.ChromeOptions()
-        options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--window-size=1280,720")
+        soup = BeautifulSoup(html, "html.parser")
 
-        driver = uc.Chrome(options=options)
-        driver.get(url)
+        # Extract first matching event
+        pattern = re.compile(r'/movies/.*?/ET\d+')
+        match = soup.find("a", href=pattern)
 
-        # Wait until movie cards are loaded
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "a[href^='/movies/'] div.__name"))
-        )
-
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        driver.quit()
-
-        movie_cards = soup.select("a[href^='/movies/']")
-        movie_url, movie_title = None, None
-
-        for card in movie_cards:
-            href = card.get("href")
-            title_tag = card.select_one("div.__name")
-            if not title_tag:
-                continue
-            title = title_tag.get_text(strip=True).lower()
-            if query in title:
-                movie_url = f"https://in.bookmyshow.com{href}"
-                movie_title = title.title()
-                break
-
-        if not movie_url:
+        if not match:
             return await msg.edit("❌ Movie not found on BookMyShow.")
 
-        # Fetch poster using cloudscraper
-        scraper = cloudscraper.create_scraper()
-        movie_page = scraper.get(movie_url).text
-        soup = BeautifulSoup(movie_page, "html.parser")
+        url = match["href"]
+        event_code = url.split("/")[-1]  # ET00301886
 
-        landscape = soup.find("meta", {"property": "og:image"})
-        landscape_url = landscape["content"] if landscape else None
+        # Format both portrait and landscape URLs
+        landscape_url = f"https://assets-in.bmscdn.com/discovery-catalog/events/{event_code}-landscape.jpg"
+        portrait_url  = f"https://assets-in.bmscdn.com/discovery-catalog/events/{event_code}-portrait.jpg"
 
-        portrait_img = soup.select_one("img[src*='in.bmscdn.com']")
-        portrait_url = portrait_img["src"] if portrait_img else landscape_url
-
-        await msg.edit(f"""
-🎬 <b>{movie_title}</b>
-
-🖼️ <b>Landscape:</b> <a href="{landscape_url}">Click Here</a>
-🖼️ <b>Portrait:</b> <a href="{portrait_url}">Click Here</a>
-🔗 <a href="{movie_url}">View on BookMyShow</a>
-""", disable_web_page_preview=False)
+        await msg.delete()
+        await message.reply_photo(
+            photo=portrait_url,
+            caption=f"🎬 **{query.title()}**\n\n📸 **Posters:**\n[Portrait]({portrait_url}) | [Landscape]({landscape_url})\n\ncc: @PostersUniverse2",
+            quote=True,
+        )
 
     except Exception as e:
         await msg.edit(f"❌ Error occurred:\n<code>{e}</code>")
-
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
