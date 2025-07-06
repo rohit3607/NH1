@@ -7,6 +7,7 @@ from io import BytesIO
 import subprocess, sys
 import cloudscraper
 import aiohttp
+import json
 import pyromod.listen
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -259,6 +260,7 @@ async def update_bot(client, message):
     except Exception as e:
         await msg.edit(f"⚠️ Error: {e}")
 
+# ---------------- POSTER ---------------- #
 
 @app.on_message(filters.command("bms") & filters.private)
 async def fetch_bms_posters(client, message: Message):
@@ -270,35 +272,49 @@ async def fetch_bms_posters(client, message: Message):
 
     try:
         scraper = cloudscraper.create_scraper()
-        search_url = f"https://in.bookmyshow.com/explore/movies-delhi?query={query.replace(' ', '%20')}"
-        html = scraper.get(search_url).text
-        soup = BeautifulSoup(html, "html.parser")
+        url = f"https://in.bookmyshow.com/serv/getData?cmd=QUICKSEARCH&input={query.replace(' ', '%20')}"
+        res = scraper.get(url)
+        if res.status_code != 200:
+            return await msg.edit("❌ Failed to fetch from BMS API.")
 
-        movie_card = soup.select_one("ul.__event-list li a")
-        if not movie_card:
-            return await msg.edit("❌ Movie not found on BookMyShow.")
+        data = res.json()
 
-        movie_url = "https://in.bookmyshow.com" + movie_card["href"]
+        # Look for "Movies" section
+        movies = [item for item in data.get("data", []) if item.get("type") == "MOVIE"]
+        if not movies:
+            return await msg.edit("❌ No matching movie found.")
+
+        # Pick the first result
+        movie = movies[0]
+        name = movie.get("name")
+        slug = movie.get("slug")  # This will help us get full movie URL
+
+        movie_url = f"https://in.bookmyshow.com/explore/movies/{slug}"
         movie_html = scraper.get(movie_url).text
-        movie_soup = BeautifulSoup(movie_html, "html.parser")
+        soup = BeautifulSoup(movie_html, "html.parser")
 
-        # Landscape
-        landscape_meta = movie_soup.find("meta", property="og:image")
-        landscape_url = landscape_meta["content"] if landscape_meta else "Not found"
+        # Landscape poster from og:image
+        og_image = soup.find("meta", {"property": "og:image"})
+        landscape = og_image["content"] if og_image else None
 
-        # Portrait
-        portrait_img_tag = movie_soup.select_one("div.sc-5ea9f243-0 img")
-        portrait_url = portrait_img_tag["src"] if portrait_img_tag else "Not found"
+        # Portrait from BMS structure
+        portrait_img = soup.select_one("img.sc-133848s-2")
+        portrait = portrait_img["src"] if portrait_img else landscape  # fallback to landscape
 
-        text = f"""
-🎬 <b>{query.title()}</b>
+        # Reply with both posters
+        await msg.edit(
+            f"""
+🎬 <b>{name}</b>
 
-🖼️ <b>Landscape Poster</b>: <a href="{landscape_url}">Click Here</a>
-🖼️ <b>Portrait Poster</b>: <a href="{portrait_url}">Click Here</a>
-"""
-        await msg.edit(text, disable_web_page_preview=False)
+🖼️ <b>Landscape Poster</b>: <a href="{landscape}">Click Here</a>
+🖼️ <b>Portrait Poster</b>: <a href="{portrait}">Click Here</a>
+🔗 <a href="{movie_url}">View on BookMyShow</a>
+""",
+            disable_web_page_preview=False
+        )
     except Exception as e:
-        await msg.edit(f"❌ Error fetching poster:\n<code>{e}</code>")
+        await msg.edit(f"❌ Error: <code>{e}</code>")
+
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
