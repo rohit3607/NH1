@@ -76,6 +76,68 @@ class Bot(Client):
 
 app = Bot()
 
+from pyrogram import Client, filters
+from pyrogram.types import Message
+import aiohttp
+from bs4 import BeautifulSoup
+import re
+
+@app.on_message(filters.command('search') & filters.private)
+async def search_movie(client: Client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply("Please provide a movie name to search.\n\nExample: `/search Kalki`", quote=True)
+
+    query = message.text.split(" ", maxsplit=1)[1]
+    search_url = f"https://in.bookmyshow.com/explore/movies"
+
+    await message.reply(f"🔎 Searching for **{query}** on BookMyShow...", quote=True)
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(search_url) as resp:
+            if resp.status != 200:
+                return await message.reply("❌ Failed to fetch data from BookMyShow.")
+            html = await resp.text()
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Find all movie cards
+    movies = soup.find_all("a", href=re.compile("/movies/"))
+
+    found = None
+    for movie in movies:
+        title_tag = movie.find("div", class_="card-title")
+        if not title_tag:
+            continue
+        title = title_tag.text.strip()
+        if query.lower() in title.lower():
+            found = movie
+            break
+
+    if not found:
+        return await message.reply("❌ Movie not found on BookMyShow.")
+
+    movie_url = "https://in.bookmyshow.com" + found['href']
+    async with aiohttp.ClientSession() as session:
+        async with session.get(movie_url) as resp:
+            if resp.status != 200:
+                return await message.reply("❌ Failed to load movie page.")
+            movie_html = await resp.text()
+
+    soup = BeautifulSoup(movie_html, "html.parser")
+
+    # Extract image meta tags
+    og_image = soup.find("meta", property="og:image")
+    twitter_image = soup.find("meta", attrs={"name": "twitter:image"})
+
+    portrait_url = og_image["content"] if og_image else "❌ Not found"
+    landscape_url = twitter_image["content"] if twitter_image else "❌ Not found"
+
+    response_text = f"🎬 **{title}**\n\n"
+    response_text += f"📸 **Portrait Poster**:\n{portrait_url}\n\n"
+    response_text += f"🌄 **Landscape Poster**:\n{landscape_url}"
+
+    return await message.reply(response_text)
+
 # ---------------- START HANDLER ---------------- #
 @app.on_message(filters.command('start') & filters.private)
 async def start_command(_, message: Message):
