@@ -265,55 +265,63 @@ async def update_bot(client, message):
 @app.on_message(filters.command("bms") & filters.private)
 async def fetch_bms_posters(client, message: Message):
     if len(message.command) < 2:
-        return await message.reply("❌ Usage:\n`/bms movie name`", quote=True)
+        return await message.reply("❌ Usage:\n<b>/bms movie name</b>", quote=True)
 
     query = " ".join(message.command[1:])
-    msg = await message.reply(f"🔍 Searching BookMyShow for: `{query}`...", quote=True)
+    msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
 
     try:
         scraper = cloudscraper.create_scraper()
-        url = f"https://in.bookmyshow.com/serv/getData?cmd=QUICKSEARCH&input={query.replace(' ', '%20')}"
-        res = scraper.get(url)
-        if res.status_code != 200:
-            return await msg.edit("❌ Failed to fetch from BMS API.")
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://in.bookmyshow.com/",
+            "Origin": "https://in.bookmyshow.com"
+        }
 
-        data = res.json()
+        # Step 1: Use QUICKSEARCH API to get movie slug
+        api_url = f"https://in.bookmyshow.com/serv/getData?cmd=QUICKSEARCH&input={query.replace(' ', '%20')}"
+        res = scraper.get(api_url, headers=headers)
 
-        # Look for "Movies" section
-        movies = [item for item in data.get("data", []) if item.get("type") == "MOVIE"]
-        if not movies:
-            return await msg.edit("❌ No matching movie found.")
+        if res.status_code != 200 or "data" not in res.text:
+            return await msg.edit("❌ BookMyShow API didn't return valid data.")
 
-        # Pick the first result
-        movie = movies[0]
+        data = res.json().get("data", [])
+        movie = next((m for m in data if m.get("type") == "MOVIE"), None)
+
+        if not movie:
+            return await msg.edit("❌ No movie found.")
+
         name = movie.get("name")
-        slug = movie.get("slug")  # This will help us get full movie URL
+        slug = movie.get("slug")
+        if not slug:
+            return await msg.edit("❌ Slug not found for movie.")
 
+        # Step 2: Scrape movie page
         movie_url = f"https://in.bookmyshow.com/explore/movies/{slug}"
-        movie_html = scraper.get(movie_url).text
-        soup = BeautifulSoup(movie_html, "html.parser")
+        html = scraper.get(movie_url, headers=headers).text
+        soup = BeautifulSoup(html, "html.parser")
 
-        # Landscape poster from og:image
-        og_image = soup.find("meta", {"property": "og:image"})
-        landscape = og_image["content"] if og_image else None
+        # Step 3: Extract posters
+        landscape = soup.find("meta", {"property": "og:image"})
+        landscape_url = landscape["content"] if landscape else None
 
-        # Portrait from BMS structure
-        portrait_img = soup.select_one("img.sc-133848s-2")
-        portrait = portrait_img["src"] if portrait_img else landscape  # fallback to landscape
+        portrait_tag = soup.select_one("img.sc-133848s-2") or soup.select_one("img.sc-7o7nez-0")
+        portrait_url = portrait_tag["src"] if portrait_tag else landscape_url
 
-        # Reply with both posters
-        await msg.edit(
-            f"""
+        if not landscape_url and not portrait_url:
+            return await msg.edit("❌ Posters not found.")
+
+        # Step 4: Show result
+        await msg.edit(f"""
 🎬 <b>{name}</b>
 
-🖼️ <b>Landscape Poster</b>: <a href="{landscape}">Click Here</a>
-🖼️ <b>Portrait Poster</b>: <a href="{portrait}">Click Here</a>
+🖼️ <b>Landscape:</b> <a href="{landscape_url}">Click Here</a>
+🖼️ <b>Portrait:</b> <a href="{portrait_url}">Click Here</a>
 🔗 <a href="{movie_url}">View on BookMyShow</a>
-""",
-            disable_web_page_preview=False
-        )
+""", disable_web_page_preview=False)
+
     except Exception as e:
-        await msg.edit(f"❌ Error: <code>{e}</code>")
+        await msg.edit(f"❌ Error:\n<code>{e}</code>")
 
 
 # ---------------- RUN BOT ---------------- #
