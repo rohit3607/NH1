@@ -267,8 +267,10 @@ from pyrogram.types import Message
 from bs4 import BeautifulSoup
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import cloudscraper
 import asyncio
-import time
 
 @app.on_message(filters.command("bms") & filters.private)
 async def bms_poster(client, message: Message):
@@ -279,37 +281,48 @@ async def bms_poster(client, message: Message):
     msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
 
     try:
+        city = "chennai"
+        url = f"https://in.bookmyshow.com/explore/movies-{city}"
+
+        # Setup undetected Chrome
         options = uc.ChromeOptions()
         options.add_argument("--headless")
-        options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--window-size=1280,720")
 
-        browser = uc.Chrome(options=options)
-        city = "chennai"
-        browser.get(f"https://in.bookmyshow.com/explore/movies-{city}")
-        time.sleep(6)
+        driver = uc.Chrome(options=options)
+        driver.get(url)
 
-        # Let JS load and extract all cards
-        cards = browser.find_elements(By.CSS_SELECTOR, "a.__movie-card")
+        # Wait until movie cards are loaded
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "a[href^='/movies/'] div.__name"))
+        )
 
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        driver.quit()
+
+        movie_cards = soup.select("a[href^='/movies/']")
         movie_url, movie_title = None, None
-        for card in cards:
-            title_element = card.find_element(By.CSS_SELECTOR, "div.__name")
-            title = title_element.text.strip().lower()
+
+        for card in movie_cards:
+            href = card.get("href")
+            title_tag = card.select_one("div.__name")
+            if not title_tag:
+                continue
+            title = title_tag.get_text(strip=True).lower()
             if query in title:
-                movie_url = card.get_attribute("href")
-                movie_title = title_element.text.strip()
+                movie_url = f"https://in.bookmyshow.com{href}"
+                movie_title = title.title()
                 break
 
         if not movie_url:
-            browser.quit()
             return await msg.edit("❌ Movie not found on BookMyShow.")
 
-        browser.get(movie_url)
-        time.sleep(4)
-        soup = BeautifulSoup(browser.page_source, "html.parser")
-        browser.quit()
+        # Fetch poster using cloudscraper
+        scraper = cloudscraper.create_scraper()
+        movie_page = scraper.get(movie_url).text
+        soup = BeautifulSoup(movie_page, "html.parser")
 
         landscape = soup.find("meta", {"property": "og:image"})
         landscape_url = landscape["content"] if landscape else None
