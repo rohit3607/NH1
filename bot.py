@@ -262,10 +262,14 @@ async def update_bot(client, message):
 
 # ---------------- POSTER ---------------- #
 
+from pyrogram import Client, filters
+from pyrogram.types import Message
 from selenium.webdriver.common.by import By
 import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
 import time
+import cloudscraper
+import os
 
 @app.on_message(filters.command("bms") & filters.private)
 async def bms_posters_cmd(client, message: Message):
@@ -276,12 +280,14 @@ async def bms_posters_cmd(client, message: Message):
     msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
 
     try:
-        # Init headless browser
         options = uc.ChromeOptions()
         options.add_argument("--headless")
         options.add_argument("--disable-gpu")
         options.add_argument("--no-sandbox")
         options.add_argument("--window-size=1280,720")
+
+        # REQUIRED: Set Chrome binary path if needed
+        options.binary_location = "/usr/bin/google-chrome"  # ✅ Replace this path if needed
 
         browser = uc.Chrome(options=options)
         city = "chennai"
@@ -289,8 +295,8 @@ async def bms_posters_cmd(client, message: Message):
 
         browser.get(explore_url)
         time.sleep(5)  # Wait for JS to load
-        soup = BeautifulSoup(browser.page_source, "html.parser")
 
+        soup = BeautifulSoup(browser.page_source, "html.parser")
         browser.quit()
 
         movie_cards = soup.select("a[href*='/movies/']")
@@ -311,8 +317,6 @@ async def bms_posters_cmd(client, message: Message):
         if not movie_url:
             return await msg.edit("❌ Movie not found on BookMyShow.")
 
-        # Fetch movie page to extract posters
-        import cloudscraper
         scraper = cloudscraper.create_scraper()
         movie_page = scraper.get(movie_url).text
         soup = BeautifulSoup(movie_page, "html.parser")
