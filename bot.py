@@ -5,7 +5,8 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-
+import ssl
+from aiohttp import web
 import aiohttp
 import pyromod.listen
 from pyrogram import Client, filters
@@ -30,6 +31,11 @@ async def web_server():
     web_app = web.Application(client_max_size=9000000000)
     web_app.add_routes(routes)
     return web_app
+
+ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ssl_context.load_cert_chain('/path/to/cert.pem', '/path/to/key.pem')
+
+web.run_app(app, ssl_context=ssl_context, host="0.0.0.0", port=443)
 
 # ---------------- BOT INIT ---------------- #
 class Bot(Client):
