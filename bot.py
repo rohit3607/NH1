@@ -265,63 +265,51 @@ async def update_bot(client, message):
 @app.on_message(filters.command("bms") & filters.private)
 async def fetch_bms_posters(client, message: Message):
     if len(message.command) < 2:
-        return await message.reply("❌ Usage:\n<b>/bms movie name</b>", quote=True)
+        return await message.reply("❌ Usage: `/bms movie name`", quote=True)
 
-    query = " ".join(message.command[1:])
-    msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
+    query = " ".join(message.command[1:]).lower()
+    msg = await message.reply(f"🔍 Searching BookMyShow for: `{query}`...", quote=True)
 
     try:
         scraper = cloudscraper.create_scraper()
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://in.bookmyshow.com/",
-            "Origin": "https://in.bookmyshow.com"
-        }
-
-        # Step 1: Use QUICKSEARCH API to get movie slug
-        api_url = f"https://in.bookmyshow.com/serv/getData?cmd=QUICKSEARCH&input={query.replace(' ', '%20')}"
-        res = scraper.get(api_url, headers=headers)
-
-        if res.status_code != 200 or "data" not in res.text:
-            return await msg.edit("❌ BookMyShow API didn't return valid data.")
-
-        data = res.json().get("data", [])
-        movie = next((m for m in data if m.get("type") == "MOVIE"), None)
-
-        if not movie:
-            return await msg.edit("❌ No movie found.")
-
-        name = movie.get("name")
-        slug = movie.get("slug")
-        if not slug:
-            return await msg.edit("❌ Slug not found for movie.")
-
-        # Step 2: Scrape movie page
-        movie_url = f"https://in.bookmyshow.com/explore/movies/{slug}"
-        html = scraper.get(movie_url, headers=headers).text
+        html = scraper.get("https://in.bookmyshow.com/explore/movies-chennai").text
         soup = BeautifulSoup(html, "html.parser")
 
-        # Step 3: Extract posters
-        landscape = soup.find("meta", {"property": "og:image"})
+        movie_cards = soup.select("a.sc-7o7nez-0")  # Link cards
+
+        match = None
+        for card in movie_cards:
+            title_tag = card.select_one("div.sc-7o7nez-1")
+            if title_tag and query in title_tag.text.lower():
+                match = card
+                break
+
+        if not match:
+            return await msg.edit("❌ Movie not found on BookMyShow (region: Chennai).")
+
+        movie_url = "https://in.bookmyshow.com" + match["href"]
+        movie_html = scraper.get(movie_url).text
+        movie_soup = BeautifulSoup(movie_html, "html.parser")
+
+        landscape = movie_soup.find("meta", {"property": "og:image"})
         landscape_url = landscape["content"] if landscape else None
 
-        portrait_tag = soup.select_one("img.sc-133848s-2") or soup.select_one("img.sc-7o7nez-0")
+        portrait_tag = movie_soup.select_one("img.sc-133848s-2") or movie_soup.select_one("img.sc-7o7nez-0")
         portrait_url = portrait_tag["src"] if portrait_tag else landscape_url
 
-        if not landscape_url and not portrait_url:
-            return await msg.edit("❌ Posters not found.")
+        await msg.edit(
+            f"""
+🎬 <b>{query.title()}</b>
 
-        # Step 4: Show result
-        await msg.edit(f"""
-🎬 <b>{name}</b>
-
-🖼️ <b>Landscape:</b> <a href="{landscape_url}">Click Here</a>
-🖼️ <b>Portrait:</b> <a href="{portrait_url}">Click Here</a>
-🔗 <a href="{movie_url}">View on BookMyShow</a>
-""", disable_web_page_preview=False)
+🖼️ <b>Landscape Poster</b>: <a href="{landscape_url}">Click Here</a>
+🖼️ <b>Portrait Poster</b>: <a href="{portrait_url}">Click Here</a>
+🔗 <a href="{movie_url}">Open on BookMyShow</a>
+""",
+            disable_web_page_preview=False
+        )
 
     except Exception as e:
-        await msg.edit(f"❌ Error:\n<code>{e}</code>")
+        await msg.edit(f"❌ Error occurred:\n<code>{e}</code>")
 
 
 # ---------------- RUN BOT ---------------- #
