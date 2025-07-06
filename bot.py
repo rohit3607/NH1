@@ -5,8 +5,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-import ssl
-from aiohttp import web
+
 import aiohttp
 import pyromod.listen
 from pyrogram import Client, filters
@@ -40,7 +39,7 @@ class Bot(Client):
             api_id=APP_ID,
             api_hash=API_HASH,
             bot_token=TG_BOT_TOKEN,
-            workers=50
+            workers=4
         )
         self.LOGGER = LOGGER
 
@@ -52,25 +51,14 @@ class Bot(Client):
         self.uptime = datetime.now()
         self.LOGGER(__name__).info(f"Bot Running...! @{self.username}")
 
-        # Initialize aiohttp HTTPS server
-        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-        ssl_context.load_cert_chain(
-            '/etc/letsencrypt/live/yourdomain.com/fullchain.pem',
-            '/etc/letsencrypt/live/yourdomain.com/privkey.pem'
-        )
-
         runner = web.AppRunner(await web_server())
         await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", 443, ssl_context=ssl_context)
-        await site.start()
+        await web.TCPSite(runner, "0.0.0.0", PORT).start()
 
         try:
-            await self.send_message(
-                OWNER_ID,
-                "<b><blockquote>Bot restarted.</blockquote></b>"
-            )
-        except Exception as e:
-            self.LOGGER(__name__).warning(f"Failed to notify owner: {e}")
+            await self.send_message(OWNER_ID, "<b><blockquote>Bot restarted.</blockquote></b>")
+        except:
+            pass
 
     async def stop(self):
         await super().stop()
@@ -82,74 +70,11 @@ class Bot(Client):
         try:
             loop.run_forever()
         except KeyboardInterrupt:
-            self.LOGGER(__name__).info("Interrupted by user.")
+            self.LOGGER(__name__).info("Interrupted.")
         finally:
             loop.run_until_complete(self.stop())
 
-
 app = Bot()
-
-from pyrogram import Client, filters
-from pyrogram.types import Message
-import aiohttp
-from bs4 import BeautifulSoup
-import re
-
-@app.on_message(filters.command('search') & filters.private)
-async def search_movie(client: Client, message: Message):
-    if len(message.command) < 2:
-        return await message.reply("Please provide a movie name to search.\n\nExample: `/search Kalki`", quote=True)
-
-    query = message.text.split(" ", maxsplit=1)[1]
-    search_url = f"https://in.bookmyshow.com/explore/movies"
-
-    await message.reply(f"🔎 Searching for **{query}** on BookMyShow...", quote=True)
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(search_url) as resp:
-            if resp.status != 200:
-                return await message.reply("❌ Failed to fetch data from BookMyShow.")
-            html = await resp.text()
-
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Find all movie cards
-    movies = soup.find_all("a", href=re.compile("/movies/"))
-
-    found = None
-    for movie in movies:
-        title_tag = movie.find("div", class_="card-title")
-        if not title_tag:
-            continue
-        title = title_tag.text.strip()
-        if query.lower() in title.lower():
-            found = movie
-            break
-
-    if not found:
-        return await message.reply("❌ Movie not found on BookMyShow.")
-
-    movie_url = "https://in.bookmyshow.com" + found['href']
-    async with aiohttp.ClientSession() as session:
-        async with session.get(movie_url) as resp:
-            if resp.status != 200:
-                return await message.reply("❌ Failed to load movie page.")
-            movie_html = await resp.text()
-
-    soup = BeautifulSoup(movie_html, "html.parser")
-
-    # Extract image meta tags
-    og_image = soup.find("meta", property="og:image")
-    twitter_image = soup.find("meta", attrs={"name": "twitter:image"})
-
-    portrait_url = og_image["content"] if og_image else "❌ Not found"
-    landscape_url = twitter_image["content"] if twitter_image else "❌ Not found"
-
-    response_text = f"🎬 **{title}**\n\n"
-    response_text += f"📸 **Portrait Poster**:\n{portrait_url}\n\n"
-    response_text += f"🌄 **Landscape Poster**:\n{landscape_url}"
-
-    return await message.reply(response_text)
 
 # ---------------- START HANDLER ---------------- #
 @app.on_message(filters.command('start') & filters.private)
