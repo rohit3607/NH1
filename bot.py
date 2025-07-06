@@ -32,8 +32,11 @@ async def web_server():
     web_app.add_routes(routes)
     return web_app
 
-ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ssl_context.load_cert_chain('/path/to/cert.pem', '/path/to/key.pem')
+ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+ssl_context.load_cert_chain(
+    '/etc/letsencrypt/live/yourdomain.com/fullchain.pem',
+    '/etc/letsencrypt/live/yourdomain.com/privkey.pem'
+)
 
 web.run_app(app, ssl_context=ssl_context, host="0.0.0.0", port=443)
 
