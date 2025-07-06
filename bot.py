@@ -262,68 +262,53 @@ async def update_bot(client, message):
 
 # ---------------- POSTER ---------------- #
 
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from bs4 import BeautifulSoup
+import cloudscraper
+
 @app.on_message(filters.command("bms") & filters.private)
-async def fetch_bms_posters(client, message: Message):
+async def fetch_bms_posters(client: Client, message: Message):
     if len(message.command) < 2:
-        return await message.reply("❌ Usage:\n<b>/bms movie name</b>", quote=True)
+        return await message.reply("❌ Usage: `/bms movie name`", quote=True)
 
     query = " ".join(message.command[1:]).lower()
-    msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
+    msg = await message.reply(f"🔍 Searching BookMyShow for: `{query}`...", quote=True)
 
     try:
-        import cloudscraper
-        from bs4 import BeautifulSoup
-
+        CITY = "mumbai"  # Change to "chennai", "delhi", "bangalore", etc. as needed
         scraper = cloudscraper.create_scraper()
-        city = "delhi"  # you can change this to mumbai, delhi, etc.
-        explore_url = f"https://in.bookmyshow.com/explore/movies-{city}"
-        html = scraper.get(explore_url).text
-
+        html = scraper.get(f"https://in.bookmyshow.com/explore/movies-{CITY}").text
         soup = BeautifulSoup(html, "html.parser")
 
-        # Find all movie cards with proper parsing
-        movie_cards = soup.select("a[href^='/chennai/movies/']")
+        movies = soup.select("a.sc-7o7nez-0")  # BMS movie cards
+        match = None
 
-        match_url = None
-        match_title = None
-
-        for card in movie_cards:
-            full_url = "https://in.bookmyshow.com" + card["href"]
-            title_tag = card.select_one("div, h4")
-            if not title_tag:
-                continue
-            title = title_tag.get_text(strip=True).lower()
-            if query in title:
-                match_url = full_url
-                match_title = title.title()
+        for card in movies:
+            title_tag = card.select_one("div.sc-7o7nez-1")
+            if title_tag and query in title_tag.text.strip().lower():
+                match = card
                 break
 
-        if not match_url:
+        if not match:
             return await msg.edit("❌ Movie not found on BookMyShow.")
 
-        # Scrape movie page for posters
-        movie_page = scraper.get(match_url).text
-        movie_soup = BeautifulSoup(movie_page, "html.parser")
+        movie_url = "https://in.bookmyshow.com" + match["href"]
+        movie_html = scraper.get(movie_url).text
+        movie_soup = BeautifulSoup(movie_html, "html.parser")
 
-        # Landscape poster
-        og_image = movie_soup.find("meta", {"property": "og:image"})
-        landscape_url = og_image["content"] if og_image else None
+        landscape = movie_soup.find("meta", {"property": "og:image"})
+        landscape_url = landscape["content"] if landscape else "Not found"
 
-        # Portrait image
-        portrait_img = movie_soup.select_one("img[src*='in.bmscdn.com']")  # most poster images use this CDN
-        portrait_url = portrait_img["src"] if portrait_img else landscape_url
-
-        if not landscape_url and not portrait_url:
-            return await msg.edit("❌ Poster not found.")
+        portrait_tag = movie_soup.select_one("img.sc-133848s-2") or movie_soup.select_one("img.sc-7o7nez-0")
+        portrait_url = portrait_tag["src"] if portrait_tag else landscape_url
 
         await msg.edit(
-            f"""
-🎬 <b>{match_title}</b>
+            f"""🎬 <b>{query.title()}</b>
 
-🖼️ <b>Landscape:</b> <a href="{landscape_url}">Click Here</a>
-🖼️ <b>Portrait:</b> <a href="{portrait_url}">Click Here</a>
-🔗 <a href="{match_url}">View on BookMyShow</a>
-""",
+🖼️ <b>Landscape Poster</b>: <a href="{landscape_url}">Click Here</a>
+🖼️ <b>Portrait Poster</b>: <a href="{portrait_url}">Click Here</a>
+🔗 <a href="{movie_url}">Open on BookMyShow</a>""",
             disable_web_page_preview=False
         )
 
