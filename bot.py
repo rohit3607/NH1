@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-
+import cloudscraper
 import aiohttp
 import pyromod.listen
 from pyrogram import Client, filters
@@ -260,6 +260,45 @@ async def update_bot(client, message):
         await msg.edit(f"⚠️ Error: {e}")
 
 
+@app.on_message(filters.command("bms") & filters.private)
+async def fetch_bms_posters(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply("❌ Usage:\n`/bms movie name`", quote=True)
+
+    query = " ".join(message.command[1:])
+    msg = await message.reply(f"🔍 Searching BookMyShow for: `{query}`...", quote=True)
+
+    try:
+        scraper = cloudscraper.create_scraper()
+        search_url = f"https://in.bookmyshow.com/explore/movies-chennai?query={query.replace(' ', '%20')}"
+        html = scraper.get(search_url).text
+        soup = BeautifulSoup(html, "html.parser")
+
+        movie_card = soup.select_one("ul.__event-list li a")
+        if not movie_card:
+            return await msg.edit("❌ Movie not found on BookMyShow.")
+
+        movie_url = "https://in.bookmyshow.com" + movie_card["href"]
+        movie_html = scraper.get(movie_url).text
+        movie_soup = BeautifulSoup(movie_html, "html.parser")
+
+        # Landscape
+        landscape_meta = movie_soup.find("meta", property="og:image")
+        landscape_url = landscape_meta["content"] if landscape_meta else "Not found"
+
+        # Portrait
+        portrait_img_tag = movie_soup.select_one("div.sc-5ea9f243-0 img")
+        portrait_url = portrait_img_tag["src"] if portrait_img_tag else "Not found"
+
+        text = f"""
+🎬 <b>{query.title()}</b>
+
+🖼️ <b>Landscape Poster</b>: <a href="{landscape_url}">Click Here</a>
+🖼️ <b>Portrait Poster</b>: <a href="{portrait_url}">Click Here</a>
+"""
+        await msg.edit(text, disable_web_page_preview=False)
+    except Exception as e:
+        await msg.edit(f"❌ Error fetching poster:\n<code>{e}</code>")
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
