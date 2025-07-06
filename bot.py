@@ -270,7 +270,7 @@ async def fetch_bms_posters(client, message: Message):
 
     try:
         scraper = cloudscraper.create_scraper()
-        search_url = f"https://in.bookmyshow.com/explore/movies-chennai?query={query.replace(' ', '%20')}"
+        search_url = f"https://in.bookmyshow.com/explore/movies-delhi?query={query.replace(' ', '%20')}"
         html = scraper.get(search_url).text
         soup = BeautifulSoup(html, "html.parser")
 
