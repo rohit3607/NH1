@@ -262,55 +262,74 @@ async def update_bot(client, message):
 
 # ---------------- POSTER ---------------- #
 
-from pyrogram import Client, filters
-from pyrogram.types import Message
+from selenium.webdriver.common.by import By
+import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
-import cloudscraper
+import time
 
 @app.on_message(filters.command("bms") & filters.private)
-async def fetch_bms_posters(client: Client, message: Message):
+async def bms_posters_cmd(client, message: Message):
     if len(message.command) < 2:
-        return await message.reply("❌ Usage: `/bms movie name`", quote=True)
+        return await message.reply("❌ Usage:\n<b>/bms movie name</b>", quote=True)
 
-    query = " ".join(message.command[1:]).lower()
-    msg = await message.reply(f"🔍 Searching BookMyShow for: `{query}`...", quote=True)
+    query = " ".join(message.command[1:]).strip().lower()
+    msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
 
     try:
-        CITY = "mumbai"  # Change to "chennai", "delhi", "bangalore", etc. as needed
-        scraper = cloudscraper.create_scraper()
-        html = scraper.get(f"https://in.bookmyshow.com/explore/movies-{CITY}").text
-        soup = BeautifulSoup(html, "html.parser")
+        # Init headless browser
+        options = uc.ChromeOptions()
+        options.add_argument("--headless")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--window-size=1280,720")
 
-        movies = soup.select("a.sc-7o7nez-0")  # BMS movie cards
-        match = None
+        browser = uc.Chrome(options=options)
+        city = "chennai"
+        explore_url = f"https://in.bookmyshow.com/explore/movies-{city}"
 
-        for card in movies:
-            title_tag = card.select_one("div.sc-7o7nez-1")
-            if title_tag and query in title_tag.text.strip().lower():
-                match = card
+        browser.get(explore_url)
+        time.sleep(5)  # Wait for JS to load
+        soup = BeautifulSoup(browser.page_source, "html.parser")
+
+        browser.quit()
+
+        movie_cards = soup.select("a[href*='/movies/']")
+        movie_url = None
+        movie_title = None
+
+        for card in movie_cards:
+            href = card.get("href")
+            title_tag = card.select_one("div") or card.select_one("h4")
+            if not title_tag:
+                continue
+            title = title_tag.get_text(strip=True).lower()
+            if query in title:
+                movie_url = f"https://in.bookmyshow.com{href}"
+                movie_title = title.title()
                 break
 
-        if not match:
+        if not movie_url:
             return await msg.edit("❌ Movie not found on BookMyShow.")
 
-        movie_url = "https://in.bookmyshow.com" + match["href"]
-        movie_html = scraper.get(movie_url).text
-        movie_soup = BeautifulSoup(movie_html, "html.parser")
+        # Fetch movie page to extract posters
+        import cloudscraper
+        scraper = cloudscraper.create_scraper()
+        movie_page = scraper.get(movie_url).text
+        soup = BeautifulSoup(movie_page, "html.parser")
 
-        landscape = movie_soup.find("meta", {"property": "og:image"})
-        landscape_url = landscape["content"] if landscape else "Not found"
+        landscape = soup.find("meta", {"property": "og:image"})
+        landscape_url = landscape["content"] if landscape else None
 
-        portrait_tag = movie_soup.select_one("img.sc-133848s-2") or movie_soup.select_one("img.sc-7o7nez-0")
-        portrait_url = portrait_tag["src"] if portrait_tag else landscape_url
+        portrait_img = soup.select_one("img[src*='in.bmscdn.com']")
+        portrait_url = portrait_img["src"] if portrait_img else landscape_url
 
-        await msg.edit(
-            f"""🎬 <b>{query.title()}</b>
+        await msg.edit(f"""
+🎬 <b>{movie_title}</b>
 
-🖼️ <b>Landscape Poster</b>: <a href="{landscape_url}">Click Here</a>
-🖼️ <b>Portrait Poster</b>: <a href="{portrait_url}">Click Here</a>
-🔗 <a href="{movie_url}">Open on BookMyShow</a>""",
-            disable_web_page_preview=False
-        )
+🖼️ <b>Landscape:</b> <a href="{landscape_url}">Click Here</a>
+🖼️ <b>Portrait:</b> <a href="{portrait_url}">Click Here</a>
+🔗 <a href="{movie_url}">View on BookMyShow</a>
+""", disable_web_page_preview=False)
 
     except Exception as e:
         await msg.edit(f"❌ Error occurred:\n<code>{e}</code>")
