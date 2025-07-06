@@ -264,17 +264,17 @@ async def update_bot(client, message):
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from selenium.webdriver.common.by import By
-import undetected_chromedriver as uc
 from bs4 import BeautifulSoup
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+import asyncio
 import time
-import cloudscraper
-import os
 
 @app.on_message(filters.command("bms") & filters.private)
-async def bms_posters_cmd(client, message: Message):
+async def bms_poster(client, message: Message):
     if len(message.command) < 2:
-        return await message.reply("❌ Usage:\n<b>/bms movie name</b>", quote=True)
+        return await message.reply("❌ Usage: /bms movie name", quote=True)
 
     query = " ".join(message.command[1:]).strip().lower()
     msg = await message.reply(f"🔍 Searching BookMyShow for: <code>{query}</code>", quote=True)
@@ -286,26 +286,23 @@ async def bms_posters_cmd(client, message: Message):
         options.add_argument("--no-sandbox")
         options.add_argument("--window-size=1280,720")
 
-        # REQUIRED: Set Chrome binary path if needed
-        options.binary_location = "/usr/bin/google-chrome"  # ✅ Replace this path if needed
+        # Optional: You can add your Chrome binary path like this:
+        # options.binary_location = "/usr/bin/google-chrome"
 
         browser = uc.Chrome(options=options)
         city = "chennai"
-        explore_url = f"https://in.bookmyshow.com/explore/movies-{city}"
-
-        browser.get(explore_url)
-        time.sleep(5)  # Wait for JS to load
+        browser.get(f"https://in.bookmyshow.com/explore/movies-{city}")
+        time.sleep(5)
 
         soup = BeautifulSoup(browser.page_source, "html.parser")
         browser.quit()
 
-        movie_cards = soup.select("a[href*='/movies/']")
-        movie_url = None
-        movie_title = None
+        movie_cards = soup.select("a[href^='/movies/']")
+        movie_url, movie_title = None, None
 
         for card in movie_cards:
             href = card.get("href")
-            title_tag = card.select_one("div") or card.select_one("h4")
+            title_tag = card.select_one("div.__name")
             if not title_tag:
                 continue
             title = title_tag.get_text(strip=True).lower()
@@ -317,6 +314,7 @@ async def bms_posters_cmd(client, message: Message):
         if not movie_url:
             return await msg.edit("❌ Movie not found on BookMyShow.")
 
+        import cloudscraper
         scraper = cloudscraper.create_scraper()
         movie_page = scraper.get(movie_url).text
         soup = BeautifulSoup(movie_page, "html.parser")
