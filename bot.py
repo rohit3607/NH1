@@ -260,54 +260,6 @@ async def update_bot(client, message):
     except Exception as e:
         await msg.edit(f"⚠️ Error: {e}")
 
-# ---------------- POSTER ---------------- #
-
-import aiohttp
-from bs4 import BeautifulSoup
-from pyrogram import filters
-from pyrogram.types import Message
-import re
-
-BMS_SEARCH = "https://in.bookmyshow.com/explore/search?q="
-
-@app.on_message(filters.command("bms"))
-async def bms_poster_fetcher(_, message: Message):
-    query = message.text.split(" ", maxsplit=1)[1] if len(message.command) > 1 else None
-    if not query:
-        return await message.reply("❗ Please provide a movie name.\n\nExample:\n`/bms Salaar`")
-
-    msg = await message.reply("🔍 Searching BookMyShow...")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(BMS_SEARCH + query) as resp:
-                html = await resp.text()
-
-        soup = BeautifulSoup(html, "html.parser")
-
-        # Extract first matching event
-        pattern = re.compile(r'/movies/.*?/ET\d+')
-        match = soup.find("a", href=pattern)
-
-        if not match:
-            return await msg.edit("❌ Movie not found on BookMyShow.")
-
-        url = match["href"]
-        event_code = url.split("/")[-1]  # ET00301886
-
-        # Format both portrait and landscape URLs
-        landscape_url = f"https://assets-in.bmscdn.com/discovery-catalog/events/{event_code}-landscape.jpg"
-        portrait_url  = f"https://assets-in.bmscdn.com/discovery-catalog/events/{event_code}-portrait.jpg"
-
-        await msg.delete()
-        await message.reply_photo(
-            photo=portrait_url,
-            caption=f"🎬 **{query.title()}**\n\n📸 **Posters:**\n[Portrait]({portrait_url}) | [Landscape]({landscape_url})\n\ncc: @PostersUniverse2",
-            quote=True,
-        )
-
-    except Exception as e:
-        await msg.edit(f"❌ Error occurred:\n<code>{e}</code>")
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
