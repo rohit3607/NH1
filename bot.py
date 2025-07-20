@@ -12,7 +12,6 @@ async def bypass_vplink(url: str):
 
         step = 1
         first_page = True
-
         previously_clicked_texts = set()
 
         while True:
@@ -35,9 +34,8 @@ async def bypass_vplink(url: str):
                 for button in buttons:
                     try:
                         text = (await button.inner_text()).strip().upper()
-
                         if text in previously_clicked_texts:
-                            continue  # skip already clicked buttons
+                            continue
 
                         if step == 2 and any(key in text for key in ["DUAL TAP", "CLICK HERE"]):
                             print(f"[INFO] Step 2 Special Button Found: {text}")
@@ -65,7 +63,8 @@ async def bypass_vplink(url: str):
 
             if not clicked:
                 print("[ERROR] Could not click button after retries. Ending.")
-                break
+                await browser.close()
+                return None
 
             if special_dual_tap_clicked:
                 print("[INFO] Waiting 5s after clicking Dual Tap...")
@@ -73,7 +72,7 @@ async def bypass_vplink(url: str):
 
                 # After waiting, find a new button (not previously clicked)
                 new_buttons = await page.locator("button, a").all()
-                for btn in reversed(new_buttons):  # bottom-first
+                for btn in reversed(new_buttons):
                     try:
                         text = (await btn.inner_text()).strip().upper()
                         if text in previously_clicked_texts:
@@ -91,8 +90,9 @@ async def bypass_vplink(url: str):
 
             await page.wait_for_timeout(2000)
 
-if "vplink.in" in page.url and "go" in page.url:
+            if "vplink.in" in page.url and "go" in page.url:
                 print(f"[SUCCESS] Final Link: {page.url}")
+                await browser.close()
                 return page.url
 
             step += 1
@@ -101,7 +101,7 @@ if "vplink.in" in page.url and "go" in page.url:
         return None
 
 # For testing
-if name == "main":
+if __name__ == "__main__":
     test_url = "https://vplink.in/aUMMULUS"
     final = asyncio.run(bypass_vplink(test_url))
     print(f"\n[FINAL RESULT]: {final}")
