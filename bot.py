@@ -1,107 +1,104 @@
-import asyncio
-from playwright.async_api import async_playwright
-import time, sys
+from aiohttp import ClientSession, TCPConnector
+from bs4 import BeautifulSoup
+from asyncio import sleep as asleep
 
-async def bypass_vplink(url: str):
-    print(f"[INFO] Navigating to: {url}")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context()
-        page = await context.new_page()
-        await page.goto(url, timeout=60000)
+class DDLException(Exception):
+    """Custom exception for direct download link errors."""
+    pass
 
-        step = 1
-        first_page = True
-        previously_clicked_texts = set()
+async def vplink(url: str, domain: str = "https://vplink.in/", ref: str = "https://kaomojihub.com/", sltime: int = 5) -> str:
+    """
+    Async bypass function for vplink.in.
 
-        while True:
-            print(f"[STEP {step}] Current URL: {page.url}")
-            await page.wait_for_timeout(1000)
+    :param url: Shortened URL to bypass
+    :param domain: Base domain (default https://vplink.in/)
+    :param ref: Referer header (default https://kaomojihub.com/)
+    :param sltime: Sleep time before POST (default 5 sec)
+    :return: Final direct download URL
+    """
+    code = url.rstrip("/").split("/")[-1]
+    useragent = (
+        'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+    )
 
-            if first_page:
-                print("[INFO] Waiting 60s before clicking first CONTINUE...")
-                await page.wait_for_timeout(60000)
-                first_page = False
+    proxy = "http://123.141.181.1:5031"
 
-            retry_count = 0
-            max_retries = 3
-            clicked = False
-            special_dual_tap_clicked = False
+    async with ClientSession(connector=TCPConnector(ssl=False)) as session:
+        # First GET request
+        async with session.get(
+            f"{domain}{code}",
+            headers={'User-Agent': useragent},
+            proxy=proxy
+        ) as res:
+            html = await res.text()
 
-            while retry_count < max_retries and not clicked:
-                buttons = await page.locator("button, a").all()
+        # Second GET request with referer
+        async with session.get(
+            f"{domain}{code}",
+            headers={'Referer': ref, 'User-Agent': useragent},
+            proxy=proxy
+        ) as res:
+            html = await res.text()
 
-                for button in buttons:
-                    try:
-                        text = (await button.inner_text()).strip().upper()
-                        if text in previously_clicked_texts:
-                            continue
+        soup = BeautifulSoup(html, "html.parser")
+        title_tag = soup.find('title')
 
-                        if step == 2 and any(key in text for key in ["DUAL TAP", "CLICK HERE"]):
-                            print(f"[INFO] Step 2 Special Button Found: {text}")
-                            await button.scroll_into_view_if_needed()
-                            await button.click(timeout=10000)
-                            special_dual_tap_clicked = True
-                            clicked = True
-                            previously_clicked_texts.add(text)
-                            break
+        if title_tag and title_tag.text.strip() == 'Just a moment...':
+            raise DDLException("Unable to bypass due to Cloudflare protection.")
 
-                        elif text in ["CONTINUE", "GET LINK", "GO TO LINK"]:
-                            print(f"[INFO] Found button: {text}")
-                            await button.scroll_into_view_if_needed()
-                            await button.click(timeout=10000)
-                            clicked = True
-                            previously_clicked_texts.add(text)
-                            break
-                    except:
-                        continue
+        data = {
+            inp.get('name'): inp.get('value')
+            for inp in soup.find_all('input')
+            if inp.get('name') and inp.get('value')
+        }
 
-                if not clicked:
-                    retry_count += 1
-                    print(f"[WARN] Button not clickable or not found. Retrying in 10s... (Retry {retry_count}/{max_retries})")
-                    await page.wait_for_timeout(10000)
+        await asleep(sltime)
 
-            if not clicked:
-                print("[ERROR] Could not click button after retries. Ending.")
-                await browser.close()
-                return None
+        async with session.post(
+            f"{domain}links/go",
+            data=data,
+            headers={
+                'Referer': f"{domain}{code}",
+                'X-Requested-With': 'XMLHttpRequest',
+                'User-Agent': useragent
+            },
+            proxy=proxy
+        ) as resp:
+            try:
+                if 'application/json' in resp.headers.get('Content-Type', ''):
+                    json_resp = await resp.json()
+                    if 'url' in json_resp:
+                        return json_resp['url']
+                    else:
+                        raise DDLException("Key 'url' not found in JSON response.")
+                else:
+                    raise DDLException("Response is not JSON or missing 'url'.")
+            except Exception as e:
+                raise DDLException(f"Link extraction failed: {e}")
 
-            if special_dual_tap_clicked:
-                print("[INFO] Waiting 5s after clicking Dual Tap...")
-                await page.wait_for_timeout(5000)
+async def unshort(url):
+    """
+    Main async function to unshorten supported URLs.
 
-                # After waiting, find a new button (not previously clicked)
-                new_buttons = await page.locator("button, a").all()
-                for btn in reversed(new_buttons):
-                    try:
-                        text = (await btn.inner_text()).strip().upper()
-                        if text in previously_clicked_texts:
-                            continue
-                        if any(key in text for key in ["GO TO LINK", "CLICK HERE", "CONTINUE"]):
-                            print(f"[INFO] Clicking newly appeared button after dual tap: {text}")
-                            await btn.scroll_into_view_if_needed()
-                            await btn.click(timeout=10000)
-                            previously_clicked_texts.add(text)
-                            await page.wait_for_timeout(3000)
-                            break
-                    except Exception as e:
-                        print(f"[WARN] Failed to click button after dual tap: {e}")
-                        continue
+    :param url: Shortened URL
+    :return: Final direct download URL
+    """
+    if "vplink.in" in url.lower():
+        return await vplink(url)
+    else:
+        raise DDLException("Unsupported URL!")
 
-            await page.wait_for_timeout(2000)
-
-            if "vplink.in" in page.url and "go" in page.url:
-                print(f"[SUCCESS] Final Link: {page.url}")
-                await browser.close()
-                return page.url
-
-            step += 1
-
-        await browser.close()
-        return None
-
-# For testing
+# Example standalone test
 if __name__ == "__main__":
-    test_url = "https://vplink.in/aUMMULUS"
-    final = asyncio.run(bypass_vplink(test_url))
-    print(f"\n[FINAL RESULT]: {final}")
+    import asyncio
+
+    async def main():
+        try:
+            test_url = "https://vplink.in/VfgcOwG6"  # Replace with your test link
+            final_link = await unshort(test_url)
+            print(f"✅ Final Link: {final_link}")
+        except DDLException as e:
+            print(f"❌ Error: {e}")
+
+    asyncio.run(main())
