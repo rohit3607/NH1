@@ -8,7 +8,7 @@ async def bypass_vplink(url: str):
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context()
 
-        # 🔒 Block requests to common ad/tracker domains
+        # ✅ Block known ad/tracker domains
         async def block_ads(route, request):
             if re.search(r"(ads|doubleclick|googlesyndication|popads|propellerads|taboola|outbrain)", request.url):
                 print(f"[BLOCKED] Ad Request: {request.url}")
@@ -18,8 +18,8 @@ async def bypass_vplink(url: str):
 
         await context.route("**/*", block_ads)
 
-        # 🧼 Close all popup pages immediately
-        context.on("page", lambda page: asyncio.create_task(close_popup(page)))
+        # ✅ Close only popup pages
+        context.on("page", lambda new_page: asyncio.create_task(close_popup_if_popup(new_page)))
 
         page = await context.new_page()
         await page.goto(url, timeout=60000)
@@ -113,11 +113,15 @@ async def bypass_vplink(url: str):
         return None
 
 
-async def close_popup(page):
-    await page.wait_for_timeout(1000)
-    if page.opener:
-        print("[POPUP] Closing popup ad page.")
-        await page.close()
+# ✅ Only close actual popups (not main page)
+async def close_popup_if_popup(popup_page):
+    await popup_page.wait_for_timeout(1000)
+    if popup_page.opener:
+        print(f"[POPUP] Closing popup ad: {popup_page.url}")
+        await popup_page.close()
+    else:
+        print(f"[INFO] Opened new page but it's not a popup: {popup_page.url}")
+
 
 # For testing
 if __name__ == "__main__":
