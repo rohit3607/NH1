@@ -19,8 +19,8 @@ async def bypass_vplink(url: str):
             await page.wait_for_timeout(1000)
 
             if first_page:
-                print("[INFO] Waiting 15s before clicking first CONTINUE...")
-                await page.wait_for_timeout(15000)
+                print("[INFO] Waiting 60s before clicking first CONTINUE...")
+                await page.wait_for_timeout(60000)
                 first_page = False
 
             retry_count = 0
