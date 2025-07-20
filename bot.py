@@ -1,18 +1,31 @@
 import asyncio
 from playwright.async_api import async_playwright
-import time, sys
+import re
 
 async def bypass_vplink(url: str):
     print(f"[INFO] Navigating to: {url}")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context()
+
+        # 🔒 Block requests to common ad/tracker domains
+        async def block_ads(route, request):
+            if re.search(r"(ads|doubleclick|googlesyndication|popads|propellerads|taboola|outbrain)", request.url):
+                print(f"[BLOCKED] Ad Request: {request.url}")
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await context.route("**/*", block_ads)
+
+        # 🧼 Close all popup pages immediately
+        context.on("page", lambda page: asyncio.create_task(close_popup(page)))
+
         page = await context.new_page()
         await page.goto(url, timeout=60000)
 
         step = 1
         first_page = True
-
         previously_clicked_texts = set()
 
         while True:
@@ -35,11 +48,10 @@ async def bypass_vplink(url: str):
                 for button in buttons:
                     try:
                         text = (await button.inner_text()).strip().upper()
-
                         if text in previously_clicked_texts:
-                            continue  # skip already clicked buttons
+                            continue
 
-                        if step == 2 and any(key in text for key in ["DUAL TAP", "CLICK HERE"]):
+                        if step == 2 and any(k in text for k in ["DUAL TAP", "CLICK HERE"]):
                             print(f"[INFO] Step 2 Special Button Found: {text}")
                             await button.scroll_into_view_if_needed()
                             await button.click(timeout=10000)
@@ -71,14 +83,13 @@ async def bypass_vplink(url: str):
                 print("[INFO] Waiting 5s after clicking Dual Tap...")
                 await page.wait_for_timeout(5000)
 
-                # After waiting, find a new button (not previously clicked)
                 new_buttons = await page.locator("button, a").all()
-                for btn in reversed(new_buttons):  # bottom-first
+                for btn in reversed(new_buttons):
                     try:
                         text = (await btn.inner_text()).strip().upper()
                         if text in previously_clicked_texts:
                             continue
-                        if any(key in text for key in ["GO TO LINK", "CLICK HERE", "CONTINUE"]):
+                        if any(k in text for k in ["GO TO LINK", "CLICK HERE", "CONTINUE"]):
                             print(f"[INFO] Clicking newly appeared button after dual tap: {text}")
                             await btn.scroll_into_view_if_needed()
                             await btn.click(timeout=10000)
@@ -93,12 +104,20 @@ async def bypass_vplink(url: str):
 
             if "vplink.in" in page.url and "go" in page.url:
                 print(f"[SUCCESS] Final Link: {page.url}")
+                await browser.close()
                 return page.url
 
             step += 1
 
         await browser.close()
         return None
+
+
+async def close_popup(page):
+    await page.wait_for_timeout(1000)
+    if page.opener:
+        print("[POPUP] Closing popup ad page.")
+        await page.close()
 
 # For testing
 if __name__ == "__main__":
