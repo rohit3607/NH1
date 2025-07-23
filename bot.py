@@ -1,25 +1,32 @@
 import asyncio
 from truelink import TrueLinkResolver
+from concurrent.futures import ThreadPoolExecutor
 
 class DDLException(Exception):
     """Custom exception for direct download link errors."""
     pass
 
+# Initialize the resolver and a thread pool
+resolver = TrueLinkResolver()
+executor = ThreadPoolExecutor()
+
 async def unshort(url: str) -> str:
     """
-    Main async function to unshorten supported URLs using truelink.
-    
+    Async function to unshorten supported URLs using truelink.
+    Falls back to thread-safe sync resolve.
+
     :param url: Shortened URL
     :return: Final direct download URL
     """
+    loop = asyncio.get_event_loop()
     try:
-        resolver = TrueLinkResolver()
-        final_link = await resolver.aresolve(url)
+        # Run the sync `resolve()` method in a thread to avoid blocking
+        final_url = await loop.run_in_executor(executor, resolver.resolve, url)
 
-        if final_link == url:
+        if final_url == url:
             raise DDLException("Could not resolve the shortened URL.")
 
-        return final_link
+        return final_url
     except Exception as e:
         raise DDLException(f"Error while bypassing: {e}")
 
@@ -27,7 +34,7 @@ async def unshort(url: str) -> str:
 if __name__ == "__main__":
     async def main():
         try:
-            test_url = "https://vplink.in/VfgcOwG6"  # Replace with a real short link
+            test_url = "https://vplink.in/VfgcOwG6"  # Replace with your test link
             final_link = await unshort(test_url)
             print(f"✅ Final Link: {final_link}")
         except DDLException as e:
