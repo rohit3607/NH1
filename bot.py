@@ -302,63 +302,56 @@ async def download_file(url: str, filename: str, message: Message):
         return None
 
 # --- Selenium Download Link Extractor ---
+import tempfile
+import os
+import shutil
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+import asyncio
+
+# Example: Use tempfile to avoid user-data-dir conflicts
 async def get_download_options(url: str):
+    # ✅ Create unique temporary user-data-dir
+    temp_user_data = tempfile.mkdtemp()
+
     chrome_options = Options()
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--disable-infobars")
-    chrome_options.add_argument("--start-maximized")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36")
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument(f"--user-data-dir={temp_user_data}")
+    chrome_options.add_argument("--disable-dev-shm-usage")
 
-    # Use a temp directory for user data to avoid session conflict
-    profile_path = tempfile.mkdtemp()
-    chrome_options.add_argument(f"--user-data-dir={profile_path}")
+    # Adjust if needed
+    chrome_path = "/usr/bin/google-chrome"
+    driver_path = "/usr/bin/chromedriver"
 
-    driver = webdriver.Chrome(options=chrome_options)
+    chrome_options.binary_location = chrome_path
+    service = Service(driver_path)
 
     try:
+        driver = webdriver.Chrome(service=service, options=chrome_options)
         driver.get(url)
-        time.sleep(5)  # wait for the page to load
 
-        cards = driver.find_elements(By.CSS_SELECTOR, "div[class*=col-lg]")
+        # Example: Wait and fetch title
+        await asyncio.sleep(3)
+        title = driver.title
 
-        results = []
+        # You can extract data here using BeautifulSoup, etc.
+        print("✅ Page title:", title)
 
-        for card in cards:
-            try:
-                if "Resolution" not in card.text:
-                    continue
-
-                quality = card.find_element(By.XPATH, ".//span[contains(text(), 'Resolution')]/following-sibling::strong").text
-                size = card.find_element(By.XPATH, ".//span[contains(text(), 'Size')]/following-sibling::strong").text
-
-                # Click to trigger countdown
-                card.click()
-                print(f"🕒 Waiting 35s for {quality} to unlock...")
-                time.sleep(35)
-
-                dl_button = card.find_element(By.XPATH, ".//a[contains(text(), 'Download')]")
-                href = dl_button.get_attribute("href")
-                filename = href.split("/")[-1]
-
-                results.append({
-                    "quality": quality.strip(),
-                    "size": size.strip(),
-                    "url": href.strip(),
-                    "filename": filename
-                })
-
-            except Exception as e:
-                print(f"⚠️ Error with one card: {e}")
-                continue
-
-        return results
+        driver.quit()
+        return {"title": title}
 
     except Exception as e:
-        print(f"❌ Error: {e}")
-        return []
+        print("❌ Error during selenium session:", e)
+        raise
 
     finally:
-        driver.quit()
+        # ✅ Clean up temp user data
+        if os.path.exists(temp_user_data):
+            shutil.rmtree(temp_user_data, ignore_errors=True)
 
 # --- /dl Command ---
 @app.on_message(filters.command("dl") & filters.private)
