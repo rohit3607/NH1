@@ -331,65 +331,69 @@ async def handle_download_button(client, callback_query):
 
 # Get resolution options using Playwright
 
-headers = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/114.0.0.0 Safari/537.36"
-    )
-}
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import time
 
+def get_download_options(url: str):
+    chrome_options = Options()
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--disable-infobars")
+    chrome_options.add_argument("--start-maximized")
 
-async def get_download_options(url: str):
-    async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                raise Exception(f"Failed to load page: {resp.status}")
-            html = await resp.text()
+    # Optional: Set user-agent
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36")
 
-        soup = BeautifulSoup(html, "html.parser")
+    driver = webdriver.Chrome(options=chrome_options)
 
-        # Find all quality blocks
-        blocks = soup.select("div.col-lg-3.col-md-4.col-sm-6.col-xs-12")
-        if not blocks:
-            raise Exception("❌ No downloadable resolutions found.")
+    try:
+        driver.get(url)
+
+        # Wait for resolution cards to load
+        time.sleep(5)
+
+        cards = driver.find_elements(By.CSS_SELECTOR, "div[class*=col-lg]")
 
         results = []
 
-        for block in blocks:
+        for card in cards:
             try:
-                quality = block.find("h4", string=re.compile("Resolution", re.I)).text.strip()
-                size = block.find("h4", string=re.compile("Size", re.I)).text.strip()
-                onclick_script = block.find("button", onclick=True)["onclick"]
+                if "Resolution" not in card.text:
+                    continue
+                quality = card.find_element(By.XPATH, ".//span[contains(text(), 'Resolution')]/following-sibling::strong").text
+                size = card.find_element(By.XPATH, ".//span[contains(text(), 'Size')]/following-sibling::strong").text
 
-                # Get the countdown URL
-                download_page_url = re.search(r"window\.location='(.*?)'", onclick_script).group(1)
-                if not download_page_url.startswith("http"):
-                    download_page_url = "https://megaup.cc" + download_page_url
+                # Click the quality to trigger countdown
+                card.click()
+                print(f"🕒 Waiting 35s for {quality} to finish countdown...")
+                time.sleep(35)
 
-                # Wait for 30 seconds (simulate countdown)
-                await asyncio.sleep(30)
+                # After countdown, download button should appear inside the same card
+                dl_button = card.find_element(By.XPATH, ".//a[contains(text(), 'Download')]")
+                href = dl_button.get_attribute("href")
+                filename = href.split("/")[-1]
 
-                # Now fetch download page and extract direct link
-                async with session.get(download_page_url) as download_page:
-                    download_html = await download_page.text()
-                download_soup = BeautifulSoup(download_html, "html.parser")
-                direct_link = download_soup.find("a", string=re.compile("Download", re.I))
+                results.append({
+                    "quality": quality.strip(),
+                    "size": size.strip(),
+                    "url": href.strip(),
+                    "filename": filename
+                })
 
-                if direct_link and direct_link["href"].startswith("http"):
-                    results.append({
-                        "quality": quality.replace("Resolution", "").strip(),
-                        "size": size.replace("Size", "").strip(),
-                        "url": direct_link["href"],
-                        "filename": direct_link["href"].split("/")[-1],
-                    })
+                break  # remove this break if you want to get multiple resolutions
+
             except Exception as e:
-                print("⚠️ Error extracting one block:", e)
+                print(f"⚠️ Skipping one card: {e}")
                 continue
 
-        if not results:
-            raise Exception("❌ No valid download links found.")
+        driver.quit()
         return results
+
+    except Exception as e:
+        driver.quit()
+        print(f"❌ Error: {e}")
+        return []
 
 
 # Download file with aiohttp and progress
