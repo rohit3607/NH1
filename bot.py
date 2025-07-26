@@ -333,7 +333,29 @@ async def handle_download_button(client, callback_query):
 async def get_download_options(url: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
-        page = await browser.new_page()
+        
+        # Set up context with normal browser headers
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/115.0.0.0 Safari/537.36"
+            ),
+            locale="en-US",
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": url,
+                "DNT": "1",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+                "Sec-Fetch-Site": "none",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-User": "?1",
+                "Sec-Fetch-Dest": "document",
+            }
+        )
+
+        page = await context.new_page()
         await page.goto(url, timeout=60000)
 
         try:
@@ -348,13 +370,14 @@ async def get_download_options(url: str):
                     size = await card.locator("text=Size").text_content()
                     dl_button = card.locator("a:has-text('Download')")
                     href = await dl_button.get_attribute("href")
-                    filename = href.split("/")[-1]
-                    results.append({
-                        "quality": quality.strip(),
-                        "size": size.strip(),
-                        "url": href.strip(),
-                        "filename": filename
-                    })
+                    if href:
+                        filename = href.split("/")[-1]
+                        results.append({
+                            "quality": quality.strip(),
+                            "size": size.strip(),
+                            "url": href.strip(),
+                            "filename": filename
+                        })
                 except:
                     continue
 
