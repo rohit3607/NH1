@@ -107,105 +107,123 @@ async def start_command(_, message: Message):
 # ---------------- INLINE SEARCH ---------------- #
 @app.on_message(filters.command("download") & filters.private)
 async def megaup_handler(client, message: Message):
-    urls = re.findall(r'https?://megaup\.cc/download/\S+', message.text)
+    urls = re.findall(r'https?://megaup\.cc/[^\s]+', message.text)
     if not urls:
         return await message.reply("❌ No valid MegaUp link found.")
-    
     for url in urls:
-        await parse_megaup_page(client, message, url)
+        await parse_megaup_variants(client, message, url)
 
-async def parse_megaup_page(client, message, url):
+async def parse_megaup_variants(client, message, url):
     scraper = cloudscraper.create_scraper()
     try:
         html = scraper.get(url).text
         soup = BeautifulSoup(html, "html.parser")
 
-        # Sometimes there's only one button with id="downloadButton"
-        direct_button = soup.find("a", {"id": "downloadButton"})
-        if direct_button and direct_button.has_attr("href"):
-            file_name = soup.find("span", class_="filename")
-            file_size = soup.find("span", class_="filesize")
-            name = file_name.text.strip() if file_name else "Unknown"
-            size = file_size.text.strip() if file_size else "Unknown"
-            buttons = [[InlineKeyboardButton(f"📥 {name} ({size})", callback_data=f"wait30|{url}|{name}")]]
-            return await message.reply(
-                f"<b>📄 File:</b> <code>{name}</code>\n<b>📦 Size:</b> <code>{size}</code>",
-                reply_markup=InlineKeyboardMarkup(buttons)
-            )
+        quality_buttons = soup.find_all("a", href=re.compile(r'^/download/\w+/\w+'))
 
-        # If multiple quality/links are available, we look for divs or a tags inside link containers
-        all_buttons = soup.find_all("a", href=re.compile(r"^/download/\w+/\w+"))
-        if not all_buttons:
-            return await message.reply("❌ No downloadable links found.")
+        if not quality_buttons:
+            # fallback: maybe it's just 1 file with direct download
+            direct_button = soup.find("a", {"id": "downloadButton"})
+            if direct_button and direct_button.has_attr("href"):
+                filename = soup.find("span", class_="filename").text.strip()
+                size = soup.find("span", class_="filesize").text.strip()
+                return await message.reply(
+                    f"<b>📄 File:</b> <code>{filename}</code>\n<b>📦 Size:</b> <code>{size}</code>",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton(f"📥 {filename} ({size})", callback_data=f"wait30|{url}|{filename}")
+                    ]])
+                )
+            return await message.reply("❌ No download buttons found.")
 
         buttons = []
-        caption = "<b>📄 Available Downloads:</b>\n\n"
-        all_files = []
+        file_list = []
+        caption = "<b>📄 Available Qualities:</b>\n\n"
 
-        for btn in all_buttons:
+        for btn in quality_buttons:
             name = btn.text.strip()
             link = "https://megaup.cc" + btn["href"]
             caption += f"• <code>{name}</code>\n"
             buttons.append([InlineKeyboardButton(f"📥 {name}", callback_data=f"wait30|{link}|{name}")])
-            all_files.append((link, name))
+            file_list.append((link, name))
 
         # Add Download All
         buttons.append([InlineKeyboardButton("📦 Download All", callback_data=json.dumps({
             "all": True,
-            "files": all_files
+            "files": file_list
         }))])
 
         await message.reply(caption, reply_markup=InlineKeyboardMarkup(buttons))
-
     except Exception as e:
-        await message.reply(f"❌ Error parsing MegaUp link: {e}")
+        await message.reply(f"❌ Error: {e}")
 
 
 @app.on_callback_query(filters.regex(r"wait30\|"))
-async def handle_wait_30(client, query: CallbackQuery):
-    _, wait_url, file_name = query.data.split("|", 2)
+async def wait_30_and_download(client, query: CallbackQuery):
+    _, url, file_name = query.data.split("|", 2)
     msg = await query.message.reply(f"⏳ Waiting 30 seconds for <code>{file_name}</code>...")
 
-    for i in range(30, 0, -5):
-        await msg.edit_text(f"⏳ Waiting... {i}s remaining for <code>{file_name}</code>")
-        await asyncio.sleep(5)
-
-    await msg.edit_text("🔍 Fetching final download link...")
-
-    # now get the direct download link
     try:
-        scraper = cloudscraper.create_scraper()
-        html = scraper.get(wait_url).text
-        soup = BeautifulSoup(html, "html.parser")
-        final_link = soup.find("a", {"id": "downloadButton"})["href"]
+        for i in range(30, 0, -5):
+            await msg.edit_text(f"⏳ Waiting... {i}s remaining for <code>{file_name}</code>")
+            await asyncio.sleep(5)
 
-        await msg.edit_text("📥 Starting download...")
-        await send_downloaded_file(client, query.from_user.id, final_link, file_name)
+        scraper = cloudscraper.create_scraper()
+        html = scraper.get(url).text
+        soup = BeautifulSoup(html, "html.parser")
+
+        download_link = soup.find("a", {"id": "downloadButton"})["href"]
+        await msg.edit_text(f"📥 Starting download: <code>{file_name}</code>")
+
+        await send_downloaded_file(client, query.from_user.id, download_link, file_name)
+        await msg.delete()
+
     except Exception as e:
-        await msg.edit(f"❌ Failed to extract final link: {e}")
+        await msg.edit(f"❌ Error: {e}")
+
+async def send_downloaded_file(client, user_id, url, file_name):
+    temp_file = tempfile.NamedTemporaryFile(delete=False)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                total = int(resp.headers.get("Content-Length", 0))
+                downloaded = 0
+                with open(temp_file.name, 'wb') as f:
+                    async for chunk in resp.content.iter_chunked(1024 * 1024):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+        await client.send_document(
+            user_id,
+            document=temp_file.name,
+            file_name=file_name,
+            caption=f"✅ <b>Downloaded:</b> <code>{file_name}</code>"
+        )
+    except Exception as e:
+        await client.send_message(user_id, f"❌ Error downloading <code>{file_name}</code>:\n{e}")
 
 @app.on_callback_query()
-async def handle_callback_json(client, query: CallbackQuery):
+async def handle_download_all(client, query: CallbackQuery):
     try:
         data = json.loads(query.data)
         if not data.get("all"):
             return
 
         files = data["files"]
-        await query.message.reply(f"📦 Starting download of {len(files)} files...")
+        await query.message.reply(f"📦 Downloading {len(files)} files...")
 
-        for wait_url, file_name in files:
-            msg = await query.message.reply(f"⏳ Starting: {file_name}")
+        for url, file_name in files:
+            msg = await query.message.reply(f"⏳ Waiting 30s: {file_name}")
             await asyncio.sleep(30)
+
             try:
                 scraper = cloudscraper.create_scraper()
-                html = scraper.get(wait_url).text
+                html = scraper.get(url).text
                 soup = BeautifulSoup(html, "html.parser")
                 final_link = soup.find("a", {"id": "downloadButton"})["href"]
                 await send_downloaded_file(client, query.from_user.id, final_link, file_name)
                 await msg.delete()
             except Exception as e:
-                await msg.edit(f"❌ Failed for {file_name}: {e}")
+                await msg.edit(f"❌ Failed: {e}")
     except:
         pass
 
