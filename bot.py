@@ -6,6 +6,7 @@ from PIL import Image
 from io import BytesIO
 import subprocess, sys
 import cloudscraper
+from playwright.async_api import async_playwright
 import aiohttp
 import json
 import pyromod.listen
@@ -277,35 +278,31 @@ def sizeof_fmt(num, suffix="B"):
     return f"{num:.1f}T{suffix}"
 
 # ⬇️ Parse file qualities and sizes
-async def parse_megaup_links(url):
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as res:
-            html = await res.text()
+async def get_megaup_links_with_playwright(url):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto(url, timeout=60000)
 
-    soup = BeautifulSoup(html, "html.parser")
+        # Wait for resolution blocks to appear
+        await page.wait_for_selector("div[class*='col-lg'] >> text=Resolution", timeout=15000)
 
-    quality_blocks = soup.find_all("div", class_="col-lg-4 col-md-6 col-sm-12")
+        blocks = await page.query_selector_all("div[class*='col-lg']")
+        results = []
 
-    if not quality_blocks:
-        raise Exception("❌ Unable to find download options on the page.")
+        for block in blocks:
+            resolution = await block.locator("div:has-text('Resolution')").inner_text()
+            filesize = await block.locator("div:has-text('Filesize')").inner_text()
+            link = await block.locator("a").get_attribute("href")
 
-    result = []
-    for block in quality_blocks:
-        a_tag = block.find("a", href=True)
-        if not a_tag:
-            continue
+            # Clean up
+            resolution_val = resolution.split(":")[-1].strip()
+            filesize_val = filesize.split(":")[-1].strip()
 
-        file_url = a_tag["href"]
-        resolution_div = block.find("div", string=re.compile("Resolution", re.I))
-        filesize_div = block.find("div", string=re.compile("Filesize", re.I))
+            results.append((link, resolution_val, filesize_val))
 
-        resolution = resolution_div.text.strip().split(":")[-1].strip() if resolution_div else "Unknown"
-        filesize = filesize_div.text.strip().split(":")[-1].strip() if filesize_div else "Unknown"
-
-        label = resolution
-        result.append((file_url, label, filesize))
-
-    return result
+        await browser.close()
+        return results
 
 # ⬇️ Progress updater
 async def progress(current, total, message, prefix="Uploading"):
@@ -377,15 +374,15 @@ async def handle_dl(client: Client, message: Message):
         return await message.reply("❌ Invalid MegaUp link.")
 
     try:
-        files = await parse_megaup_links(url)
+        files = await get_megaup_links_with_playwright(url)
         if not files:
             return await message.reply("❌ No downloadable files found.")
 
         user_file_cache[message.from_user.id] = files
 
         buttons = [
-            [InlineKeyboardButton(f"📥 {label} ({sizeof_fmt(size)})", callback_data=f"dl_{i}")]
-            for i, (_, label, size) in enumerate(files)
+            [InlineKeyboardButton(f"📥 {label} ({filesize})", callback_data=f"dl_{i}")]
+            for i, (_, label, filesize) in enumerate(files)
         ]
         buttons.append([InlineKeyboardButton("📦 Download All", callback_data="dl_all")])
 
