@@ -330,62 +330,67 @@ async def handle_download_button(client, callback_query):
         # Optionally implement full download queue
 
 # Get resolution options using Playwright
+
+headers = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/114.0.0.0 Safari/537.36"
+    )
+}
+
+
 async def get_download_options(url: str):
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-        
-        # Set up context with normal browser headers
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/115.0.0.0 Safari/537.36"
-            ),
-            locale="en-US",
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": url,
-                "DNT": "1",
-                "Connection": "keep-alive",
-                "Upgrade-Insecure-Requests": "1",
-                "Sec-Fetch-Site": "none",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-User": "?1",
-                "Sec-Fetch-Dest": "document",
-            }
-        )
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                raise Exception(f"Failed to load page: {resp.status}")
+            html = await resp.text()
 
-        page = await context.new_page()
-        await page.goto(url, timeout=60000)
+        soup = BeautifulSoup(html, "html.parser")
 
-        try:
-            # Wait for at least one resolution button to appear
-            await page.wait_for_selector("div[class*=col-lg]", timeout=15000)
-            cards = await page.locator("div[class*=col-lg]").all()
+        # Find all quality blocks
+        blocks = soup.select("div.col-lg-3.col-md-4.col-sm-6.col-xs-12")
+        if not blocks:
+            raise Exception("❌ No downloadable resolutions found.")
 
-            results = []
-            for card in cards:
-                try:
-                    quality = await card.locator("text=Resolution").text_content()
-                    size = await card.locator("text=Size").text_content()
-                    dl_button = card.locator("a:has-text('Download')")
-                    href = await dl_button.get_attribute("href")
-                    if href:
-                        filename = href.split("/")[-1]
-                        results.append({
-                            "quality": quality.strip(),
-                            "size": size.strip(),
-                            "url": href.strip(),
-                            "filename": filename
-                        })
-                except:
-                    continue
+        results = []
 
-            await browser.close()
-            return results
-        except Exception as e:
-            await browser.close()
-            return []
+        for block in blocks:
+            try:
+                quality = block.find("h4", string=re.compile("Resolution", re.I)).text.strip()
+                size = block.find("h4", string=re.compile("Size", re.I)).text.strip()
+                onclick_script = block.find("button", onclick=True)["onclick"]
+
+                # Get the countdown URL
+                download_page_url = re.search(r"window\.location='(.*?)'", onclick_script).group(1)
+                if not download_page_url.startswith("http"):
+                    download_page_url = "https://megaup.cc" + download_page_url
+
+                # Wait for 30 seconds (simulate countdown)
+                await asyncio.sleep(30)
+
+                # Now fetch download page and extract direct link
+                async with session.get(download_page_url) as download_page:
+                    download_html = await download_page.text()
+                download_soup = BeautifulSoup(download_html, "html.parser")
+                direct_link = download_soup.find("a", string=re.compile("Download", re.I))
+
+                if direct_link and direct_link["href"].startswith("http"):
+                    results.append({
+                        "quality": quality.replace("Resolution", "").strip(),
+                        "size": size.replace("Size", "").strip(),
+                        "url": direct_link["href"],
+                        "filename": direct_link["href"].split("/")[-1],
+                    })
+            except Exception as e:
+                print("⚠️ Error extracting one block:", e)
+                continue
+
+        if not results:
+            raise Exception("❌ No valid download links found.")
+        return results
+
 
 # Download file with aiohttp and progress
 async def download_file(url: str, filename: str, message: Message):
