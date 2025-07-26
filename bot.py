@@ -1,5 +1,4 @@
-f
-rom aiohttp import web
+from aiohttp import web
 import asyncio, os, re
 from urllib.parse import urlparse
 import math
