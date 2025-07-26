@@ -283,15 +283,26 @@ async def parse_megaup_links(url):
             html = await res.text()
 
     soup = BeautifulSoup(html, "html.parser")
-    script_text = soup.find("script", text=re.compile("sources")).text
-    files = re.findall(r'\{file:"(.*?)",label:"(.*?)"\}', script_text)
+
+    # Try finding a <script> containing 'sources'
+    script_tag = soup.find("script", text=re.compile("sources"))
+    if not script_tag:
+        raise Exception("Unable to find video sources on the page. The structure may have changed.")
+
+    script_text = script_tag.text
+
+    # Extract file URLs and labels
+    matches = re.findall(r'\{file:"(.*?)",label:"(.*?)"\}', script_text)
+    if not matches:
+        raise Exception("No downloadable files found in script.")
 
     result = []
     async with aiohttp.ClientSession() as session:
-        for file_url, label in files:
+        for file_url, label in matches:
             async with session.head(file_url) as r:
                 size = int(r.headers.get("Content-Length", 0))
                 result.append((file_url, label, size))
+
     return result
 
 # ⬇️ Progress updater
