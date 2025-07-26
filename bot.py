@@ -332,7 +332,7 @@ async def handle_download_button(client, callback_query):
 # Get resolution options using Playwright
 async def get_download_options(url: str):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=False)
         page = await browser.new_page()
         await page.goto(url, timeout=60000)
 
