@@ -11,7 +11,7 @@ from PIL import Image
 from io import BytesIO
 import subprocess, sys
 import cloudscraper
-from playwright.async_api import async_playwright
+#from playwright.async_api import async_playwright
 import aiohttp
 import json
 import pyromod.listen
@@ -23,9 +23,6 @@ from pyrogram.types import (
     Message, CallbackQuery, InlineQueryResultArticle,
     InputTextMessageContent, InlineKeyboardMarkup, InlineKeyboardButton
 )
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 
 # ---------------- CONFIG ---------------- #
 from config import *  # Define APP_ID, API_HASH, TG_BOT_TOKEN, OWNER_ID, PORT, LOGGER, START_MSG, START_PIC
@@ -270,134 +267,6 @@ async def update_bot(client, message):
         os.execl(sys.executable, sys.executable, *sys.argv)
     except Exception as e:
         await msg.edit(f"⚠️ Error: {e}")
-
-
-# ---------------- RUN BOT ---------------- #
-
-
-DOWNLOAD_DIR = "downloads"
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
-
-
-# --- Download File with Progress ---
-async def download_file(url: str, filename: str, message: Message):
-    save_path = os.path.join(DOWNLOAD_DIR, filename)
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                total = int(resp.headers.get("Content-Length", 0))
-                chunk = 1024 * 1024  # 1 MB
-                downloaded = 0
-                with open(save_path, "wb") as f:
-                    async for chunk_data in resp.content.iter_chunked(chunk):
-                        f.write(chunk_data)
-                        downloaded += len(chunk_data)
-                        percent = downloaded * 100 / total if total else 0
-                        await message.edit_text(f"⬇️ Downloading: `{filename}`\nProgress: {percent:.2f}%")
-
-        return save_path
-    except Exception as e:
-        print("Download Error:", e)
-        return None
-
-# --- Selenium Download Link Extractor ---
-import tempfile
-import os
-import shutil
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-import asyncio
-
-# Example: Use tempfile to avoid user-data-dir conflicts
-async def get_download_options(url: str):
-    # ✅ Create unique temporary user-data-dir
-    temp_user_data = tempfile.mkdtemp()
-
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument(f"--user-data-dir={temp_user_data}")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-
-    # Adjust if needed
-    chrome_path = "/usr/bin/google-chrome"
-    driver_path = "/usr/bin/chromedriver"
-
-    chrome_options.binary_location = chrome_path
-    service = Service(driver_path)
-
-    try:
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        driver.get(url)
-
-        # Example: Wait and fetch title
-        await asyncio.sleep(3)
-        title = driver.title
-
-        # You can extract data here using BeautifulSoup, etc.
-        print("✅ Page title:", title)
-
-        driver.quit()
-        return {"title": title}
-
-    except Exception as e:
-        print("❌ Error during selenium session:", e)
-        raise
-
-    finally:
-        # ✅ Clean up temp user data
-        if os.path.exists(temp_user_data):
-            shutil.rmtree(temp_user_data, ignore_errors=True)
-
-# --- /dl Command ---
-@app.on_message(filters.command("dl") & filters.private)
-async def dl_handler(client: Client, message: Message):
-    if len(message.command) < 2:
-        return await message.reply("❗ Send a MegaUp link.\nExample: `/dl https://megaup.cc/...`", quote=True)
-
-    url = message.command[1]
-    await message.reply("🔍 Fetching qualities... This may take a moment.")
-
-    files = await get_download_options(url)
-    if not files:
-        return await message.reply("❌ No downloadable resolutions found.")
-
-    # Save to user-specific context (for demo, use message.chat.id as key if needed)
-    message.request_data = files
-
-    buttons = [
-        [InlineKeyboardButton(f"📥 {f['quality']} - {f['size']}", callback_data=f"dl::{f['url']}::{f['filename']}")]
-        for f in files
-    ]
-    buttons.append([InlineKeyboardButton("⬇️ Download All", callback_data="dl_all")])
-
-    await message.reply("🎬 Select quality to download:", reply_markup=InlineKeyboardMarkup(buttons))
-
-# --- Button Handler ---
-@app.on_callback_query()
-async def handle_download_button(client, callback_query):
-    data = callback_query.data
-
-    if data.startswith("dl::"):
-        _, url, filename = data.split("::", 2)
-        await callback_query.message.edit_text(f"⬇️ Downloading `{filename}`...")
-
-        filepath = await download_file(url, filename, callback_query.message)
-        if not filepath:
-            return await callback_query.message.edit_text("❌ Download failed.")
-
-        await callback_query.message.edit_text("📤 Uploading to Telegram...")
-        await callback_query.message.reply_document(document=filepath, file_name=os.path.basename(filepath))
-        os.remove(filepath)
-        await callback_query.message.delete()
-
-    elif data == "dl_all":
-        await callback_query.answer("⚙️ 'Download All' not yet implemented.", show_alert=True)
-
 
 # ---------------- RUN BOT ---------------- #
 
