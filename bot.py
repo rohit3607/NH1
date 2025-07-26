@@ -2,7 +2,7 @@ from aiohttp import web
 import asyncio, os, re
 from urllib.parse import urlparse
 import math
-from tqdm.asyncio import tqdm
+from tqdm import tqdm
 from datetime import datetime
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -269,138 +269,120 @@ async def update_bot(client, message):
 
 # ---------------- RUN BOT ---------------- #
 
-# Store file links in memory
-downloads = {}
 
-async def get_file_links(url: str):
-    links = []
+DOWNLOAD_FOLDER = "downloads"
+os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
 
-    async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+# /dl command
+@app.on_message(filters.command("dl") & filters.private)
+async def dl_handler(client, message):
+    if len(message.command) < 2:
+        return await message.reply("❗ Please provide a MegaUp link.")
+    
+    url = message.command[1]
+
+    msg = await message.reply("🔍 Scraping download options...")
+    try:
+        results = await scrape_download_links(url)
+        if not results:
+            return await msg.edit("❌ No downloadable resolutions found.")
+
+        # Prepare buttons
+        buttons = []
+        for i, result in enumerate(results):
+            btn = InlineKeyboardButton(
+                text=f"{result['label']} ({result['size']})",
+                callback_data=f"dl_{i}"
+            )
+            buttons.append([btn])
+        buttons.append([InlineKeyboardButton("📥 Download All", callback_data="dl_all")])
+
+        # Store in user_data
+        message_id = f"{message.chat.id}_{message.id}"
+        user_data[message_id] = results
+
+        await msg.edit("✅ Select a file to download:", reply_markup=InlineKeyboardMarkup(buttons))
+
+    except Exception as e:
+        await msg.edit(f"❌ Error: {e}")
+
+user_data = {}
+
+async def scrape_download_links(url):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto(url, timeout=60000)
 
-        resolution_blocks = await page.locator("div[class*='col-lg'] div[class*='resolution']").all()
-        if not resolution_blocks:
-            raise Exception("❌ Unable to find resolution options")
+        # Get all resolution blocks
+        resolution_blocks = await page.locator("div[class*='col-lg'] >> text=Resolution").all()
 
-        for i, block in enumerate(resolution_blocks):
+        results = []
+
+        for idx, block in enumerate(resolution_blocks):
             await block.click()
-            await page.wait_for_timeout(35000)  # wait for countdown
-            download_btn = await page.query_selector("a.btn-download")
-            if not download_btn:
+            await page.wait_for_timeout(31000)  # 30 sec wait
+
+            try:
+                dl_button = await page.locator("a.btn.btn-download").first
+                href = await dl_button.get_attribute("href")
+                label = await dl_button.inner_text()
+                size = await page.locator("span.text-muted").text_content()
+
+                results.append({
+                    "label": label.strip(),
+                    "size": size.strip() if size else "Unknown",
+                    "url": href
+                })
+            except:
                 continue
-            href = await download_btn.get_attribute("href")
-            text = await download_btn.inner_text()
-            if href:
-                links.append((f"File {i+1}", href, text.strip()))
-            await page.reload()
 
         await browser.close()
-    return links
+        return results
 
-# /dl command handler
-@app.on_message(filters.command("dl") & filters.private)
-async def dl_handler(client, message):
-    try:
-        if len(message.command) < 2:
-            return await message.reply("⚠️ Usage: /dl <megaup_link>")
+@app.on_callback_query()
+async def handle_callback(client, callback_query):
+    data = callback_query.data
+    chat_id = callback_query.message.chat.id
+    message_id = callback_query.message.reply_to_message.id
+    message_key = f"{chat_id}_{message_id}"
 
-        url = message.command[1]
-        await message.reply("🔍 Fetching download options... Please wait 1 minute...")
+    if message_key not in user_data:
+        return await callback_query.answer("⚠️ Expired or missing data", show_alert=True)
 
-        files = await get_file_links(url)
-        if not files:
-            return await message.reply("❌ No downloadable files found.")
+    files = user_data[message_key]
 
-        file_id = str(message.from_user.id)
-        downloads[file_id] = files
+    await callback_query.answer()
+    await callback_query.message.edit("⏬ Downloading...")
 
-        # Create buttons
-        buttons = [
-            [InlineKeyboardButton(f"{name} ({size})", callback_data=f"download_{i}")]
-            for i, (name, link, size) in enumerate(files)
-        ]
-        buttons.append([InlineKeyboardButton("📥 Download All", callback_data="download_all")])
+    if data == "dl_all":
+        for file in files:
+            await download_and_send(file, chat_id, client)
+    else:
+        idx = int(data.split("_")[1])
+        file = files[idx]
+        await download_and_send(file, chat_id, client)
 
-        await message.reply("✅ Choose a file to download:", reply_markup=InlineKeyboardMarkup(buttons))
+async def download_and_send(file_info, chat_id, client):
+    url = file_info["url"]
+    name = file_info["label"].replace(" ", "_") + ".mp4"
+    path = os.path.join(DOWNLOAD_FOLDER, name)
 
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-
-# Progress display
-async def download_file(session, url, filename, progress_callback=None):
-    async with session.get(url) as resp:
-        total = int(resp.headers.get('content-length', 0))
-        with open(filename, "wb") as f:
-            downloaded = 0
-            async for chunk in resp.content.iter_chunked(1024 * 1024):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if progress_callback:
-                    await progress_callback(downloaded, total)
-    return filename
-
-# Download & upload callback
-@app.on_callback_query(filters.regex("download_"))
-async def single_download(client, callback):
-    index = int(callback.data.split("_")[1])
-    file_id = str(callback.from_user.id)
-
-    files = downloads.get(file_id)
-    if not files:
-        return await callback.message.edit_text("⚠️ Session expired. Use /dl again.")
-
-    name, link, size = files[index]
-    temp_path = f"downloads/{name.replace(' ', '_')}.bin"
-
-    await callback.answer()
-    status_msg = await callback.message.reply(f"⬇️ Downloading {name}...")
-
-    os.makedirs("downloads", exist_ok=True)
+    msg = await client.send_message(chat_id, f"⬇️ Downloading: {file_info['label']}")
 
     async with aiohttp.ClientSession() as session:
-        async def progress(d, t):
-            percent = d * 100 / t
-            await status_msg.edit_text(f"⬇️ Downloading {name}...\nProgress: {percent:.2f}%")
+        async with session.get(url) as resp:
+            total = int(resp.headers.get('Content-Length', 0))
+            with open(path, "wb") as f:
+                with tqdm(total=total, unit='B', unit_scale=True, desc=name) as pbar:
+                    async for chunk in resp.content.iter_chunked(1024):
+                        f.write(chunk)
+                        pbar.update(len(chunk))
 
-        await download_file(session, link, temp_path, progress)
-
-    await status_msg.edit_text(f"📤 Uploading {name} to Telegram...")
-
-    await client.send_document(
-        callback.from_user.id,
-        document=temp_path,
-        caption=f"✅ {name}\n💾 Size: {size}",
-    )
-    os.remove(temp_path)
-    await status_msg.delete()
-
-# Download All
-@app.on_callback_query(filters.regex("download_all"))
-async def download_all(client, callback):
-    file_id = str(callback.from_user.id)
-    files = downloads.get(file_id)
-    if not files:
-        return await callback.message.edit_text("⚠️ Session expired. Use /dl again.")
-
-    await callback.answer("⏬ Downloading all files...")
-
-    for i, (name, link, size) in enumerate(files):
-        status_msg = await callback.message.reply(f"⬇️ Downloading {name}...")
-
-        temp_path = f"downloads/{name.replace(' ', '_')}.bin"
-        async with aiohttp.ClientSession() as session:
-            async def progress(d, t):
-                percent = d * 100 / t
-                await status_msg.edit_text(f"⬇️ Downloading {name}...\nProgress: {percent:.2f}%")
-
-            await download_file(session, link, temp_path, progress)
-
-        await status_msg.edit_text(f"📤 Uploading {name}...")
-        await client.send_document(callback.from_user.id, document=temp_path, caption=f"✅ {name} ({size})")
-        os.remove(temp_path)
-        await status_msg.delete()
+    await msg.edit("📤 Uploading...")
+    await client.send_document(chat_id, document=path, caption=file_info["label"])
+    await msg.delete()
+    os.remove(path)
 
 
 
