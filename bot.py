@@ -284,24 +284,26 @@ async def parse_megaup_links(url):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    # Try finding a <script> containing 'sources'
-    script_tag = soup.find("script", text=re.compile("sources"))
-    if not script_tag:
-        raise Exception("Unable to find video sources on the page. The structure may have changed.")
+    quality_blocks = soup.find_all("div", class_="col-lg-4 col-md-6 col-sm-12")
 
-    script_text = script_tag.text
-
-    # Extract file URLs and labels
-    matches = re.findall(r'\{file:"(.*?)",label:"(.*?)"\}', script_text)
-    if not matches:
-        raise Exception("No downloadable files found in script.")
+    if not quality_blocks:
+        raise Exception("❌ Unable to find download options on the page.")
 
     result = []
-    async with aiohttp.ClientSession() as session:
-        for file_url, label in matches:
-            async with session.head(file_url) as r:
-                size = int(r.headers.get("Content-Length", 0))
-                result.append((file_url, label, size))
+    for block in quality_blocks:
+        a_tag = block.find("a", href=True)
+        if not a_tag:
+            continue
+
+        file_url = a_tag["href"]
+        resolution_div = block.find("div", string=re.compile("Resolution", re.I))
+        filesize_div = block.find("div", string=re.compile("Filesize", re.I))
+
+        resolution = resolution_div.text.strip().split(":")[-1].strip() if resolution_div else "Unknown"
+        filesize = filesize_div.text.strip().split(":")[-1].strip() if filesize_div else "Unknown"
+
+        label = resolution
+        result.append((file_url, label, filesize))
 
     return result
 
