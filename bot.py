@@ -1,5 +1,7 @@
 from aiohttp import web
 import asyncio, os, re
+from urllib.parse import urlparse
+import math
 from datetime import datetime
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -267,152 +269,159 @@ async def update_bot(client, message):
 # ---------------- RUN BOT ---------------- #
 
 
-user_file_cache = {}
+def human_readable_size(size_bytes):
+    if size_bytes == 0:
+        return "0B"
+    size_name = ("B", "KB", "MB", "GB", "TB")
+    i = int(math.floor(math.log(size_bytes, 1024)))
+    p = math.pow(1024, i)
+    return f"{round(size_bytes / p, 2)} {size_name[i]}"
 
-# 🧠 Format size in human-readable form
-def sizeof_fmt(num, suffix="B"):
-    for unit in ["", "K", "M", "G"]:
-        if abs(num) < 1024:
-            return f"{num:.1f}{unit}{suffix}"
-        num /= 1024
-    return f"{num:.1f}T{suffix}"
 
-# ⬇️ Parse file qualities and sizes
-async def get_megaup_links_with_playwright(url):
+async def get_download_links_with_playwright(link: str):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        await page.goto(url, timeout=60000)
+        await page.goto(link)
 
-        # Wait for resolution blocks to appear
-        await page.wait_for_selector("div[class*='col-lg'] >> text=Resolution", timeout=15000)
+        try:
+            await page.wait_for_selector("div[class*='col-lg']", timeout=15000)
+        except:
+            await browser.close()
+            raise Exception("❌ Unable to find download options on the page.")
 
-        blocks = await page.query_selector_all("div[class*='col-lg']")
-        results = []
+        resolutions = await page.query_selector_all("div[class*='col-lg']")
+        files = []
 
-        for block in blocks:
-            resolution = await block.locator("div:has-text('Resolution')").inner_text()
-            filesize = await block.locator("div:has-text('Filesize')").inner_text()
-            link = await block.locator("a").get_attribute("href")
+        for res in resolutions:
+            name = await res.query_selector("h5")
+            size = await res.query_selector("p.text-muted")
+            dl_button = await res.query_selector("a.btn-primary")
 
-            # Clean up
-            resolution_val = resolution.split(":")[-1].strip()
-            filesize_val = filesize.split(":")[-1].strip()
+            if name and size and dl_button:
+                title = await name.inner_text()
+                file_size = await size.inner_text()
+                download_href = await dl_button.get_attribute("href")
 
-            results.append((link, resolution_val, filesize_val))
+                files.append({
+                    "title": title.strip(),
+                    "size": file_size.strip(),
+                    "link": f"https://megaup.cc{download_href}"
+                })
 
         await browser.close()
-        return results
+        return files
 
-# ⬇️ Progress updater
-async def progress(current, total, message, prefix="Uploading"):
-    percentage = current * 100 / total
-    bar = "█" * int(percentage / 10) + "░" * (10 - int(percentage / 10))
-    try:
-        await message.edit_text(
-            f"{prefix}...\n[{bar}] {percentage:.2f}%\n{sizeof_fmt(current)} / {sizeof_fmt(total)}"
-        )
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
 
-# ⬇️ Download file with progress
-async def download_with_progress(url, label, temp_msg):
-    filename = f"/tmp/{label.replace(' ', '_')}.mp4"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as res:
-                total = int(res.headers.get('Content-Length', 0))
-                downloaded = 0
-                with open(filename, "wb") as f:
-                    async for chunk in res.content.iter_chunked(1024 * 512):
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        await progress(downloaded, total, temp_msg, prefix="Downloading")
-        return filename
-    except Exception as e:
-        await temp_msg.edit_text(f"❌ Failed to download: {e}")
-        return None
+async def download_file(url, output_path, progress_callback):
+    import aiohttp
 
-# ⬆️ Upload with progress
-async def upload_with_progress(client, message, file_path, label):
-    total = os.path.getsize(file_path)
-    sent_msg = await message.reply("📤 Starting upload...")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            total = int(response.headers.get('Content-Length', 0))
+            downloaded = 0
+            chunk_size = 1024 * 64
 
-    async def update(current, total):
-        await progress(current, total, sent_msg, prefix="Uploading")
+            async with aiofiles.open(output_path, mode='wb') as f:
+                async for chunk in response.content.iter_chunked(chunk_size):
+                    await f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback:
+                        await progress_callback(downloaded, total)
 
-    await client.send_document(
-        message.chat.id,
-        document=file_path,
-        file_name=os.path.basename(file_path),
-        caption=f"🎬 {label}",
-        progress=update,
-        progress_args=(total,),
+
+async def progress_edit(msg: Message, stage: str, current: int, total: int):
+    percent = current * 100 / total if total else 0
+    bar = "█" * int(percent / 5) + "░" * (20 - int(percent / 5))
+    await msg.edit_text(
+        f"{stage}... {percent:.2f}%\n[{bar}] {human_readable_size(current)} / {human_readable_size(total)}"
     )
-    await sent_msg.delete()
 
-# 📥 Trigger download after 30s and send
-async def download_and_send(client, message, url, label):
-    await message.reply(f"⏳ Waiting 30s before downloading **{label}**...")
-    await asyncio.sleep(30)
 
-    progress_msg = await message.reply("🔁 Initializing download...")
-    file_path = await download_with_progress(url, label, progress_msg)
-
-    if file_path:
-        await upload_with_progress(client, message, file_path, label)
-        os.remove(file_path)
-
-# 🧠 /dl command handler
 @app.on_message(filters.command("dl") & filters.private)
 async def handle_dl(client: Client, message: Message):
     if len(message.command) < 2:
-        return await message.reply("❌ Usage: `/dl <MegaUp link>`")
+        return await message.reply("❌ Please provide a Megaup link.\n\n`/dl https://megaup.cc/...`")
 
-    url = message.command[1]
-    if "megaup.cc" not in url:
-        return await message.reply("❌ Invalid MegaUp link.")
+    link = message.command[1]
 
     try:
-        files = await get_megaup_links_with_playwright(url)
+        msg = await message.reply("🔍 Scraping link, please wait...")
+        files = await get_download_links_with_playwright(link)
+
         if not files:
-            return await message.reply("❌ No downloadable files found.")
+            return await msg.edit("❌ No files found!")
 
-        user_file_cache[message.from_user.id] = files
+        keyboard = []
+        for i, f in enumerate(files):
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"📥 {f['title']} ({f['size']})",
+                    callback_data=f"dl_{i}"
+                )
+            ])
 
-        buttons = [
-            [InlineKeyboardButton(f"📥 {label} ({filesize})", callback_data=f"dl_{i}")]
-            for i, (_, label, filesize) in enumerate(files)
-        ]
-        buttons.append([InlineKeyboardButton("📦 Download All", callback_data="dl_all")])
+        keyboard.append([InlineKeyboardButton("⬇️ Download All", callback_data="dl_all")])
+        await msg.edit("🎬 Select the file you want to download:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-        await message.reply("🎬 Choose quality to download:", reply_markup=InlineKeyboardMarkup(buttons))
+        # Save file info for session
+        client._megaup_cache = {
+            message.from_user.id: files
+        }
 
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
 
-# 🧠 Handle button clicks
-@app.on_callback_query(filters.regex(r"^dl_"))
-async def handle_button(client: Client, callback: CallbackQuery):
-    user_id = callback.from_user.id
-    data = callback.data
 
-    if user_id not in user_file_cache:
-        return await callback.answer("⚠️ Session expired. Please try again.", show_alert=True)
+@app.on_callback_query(filters.regex("dl_"))
+async def button_callback(client, callback_query):
+    user_id = callback_query.from_user.id
+    data = callback_query.data
+    files = client._megaup_cache.get(user_id)
 
-    files = user_file_cache[user_id]
-    await callback.answer()
+    if not files:
+        return await callback_query.answer("❌ Session expired. Please /dl again.", show_alert=True)
+
+    await callback_query.answer()
 
     if data == "dl_all":
-        for url, label, _ in files:
-            await download_and_send(client, callback.message, url, label)
+        selected_files = files
     else:
-        index = int(data.replace("dl_", ""))
-        if index >= len(files):
-            return await callback.message.reply("❌ Invalid selection.")
+        index = int(data.split("_")[1])
+        selected_files = [files[index]]
 
-        url, label, _ = files[index]
-        await download_and_send(client, callback.message, url, label)
+    for f in selected_files:
+        wait_msg = await callback_query.message.reply(f"⏳ Waiting 30 seconds for {f['title']}...")
+        await asyncio.sleep(30)
+
+        filename = f"{f['title']}.mp4"
+        temp_path = f"/tmp/{filename}"
+
+        progress_msg = await wait_msg.edit(f"📥 Downloading {filename}...")
+
+        try:
+            await download_file(
+                f["link"],
+                temp_path,
+                lambda current, total: progress_edit(progress_msg, "📥 Downloading", current, total)
+            )
+        except Exception as e:
+            return await progress_msg.edit(f"❌ Download error: {e}")
+
+        if not os.path.exists(temp_path):
+            return await progress_msg.edit("❌ Failed to download.")
+
+        try:
+            up_msg = await progress_msg.edit("📤 Uploading to Telegram...")
+            sent = await callback_query.message.reply_document(
+                document=temp_path,
+                caption=f"📁 {filename}",
+                progress=lambda c, t: progress_edit(up_msg, "📤 Uploading", c, t)
+            )
+        except Exception as e:
+            await up_msg.edit(f"❌ Upload error: {e}")
+        finally:
+            os.remove(temp_path)
 
 # ---------------- RUN BOT ---------------- #
 
