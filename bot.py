@@ -22,6 +22,9 @@ from pyrogram.types import (
     Message, CallbackQuery, InlineQueryResultArticle,
     InputTextMessageContent, InlineKeyboardMarkup, InlineKeyboardButton
 )
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 
 # ---------------- CONFIG ---------------- #
 from config import *  # Define APP_ID, API_HASH, TG_BOT_TOKEN, OWNER_ID, PORT, LOGGER, START_MSG, START_PIC
@@ -270,133 +273,13 @@ async def update_bot(client, message):
 
 # ---------------- RUN BOT ---------------- #
 
-DOWNLOAD_DIR = "downloads"
 
+DOWNLOAD_DIR = "downloads"
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
-# /dl {link} handler
-@app.on_message(filters.command("dl") & filters.private)
-async def dl_handler(client: Client, message: Message):
-    try:
-        if len(message.command) < 2:
-            return await message.reply("❗ Please provide a MegaUp link.\nExample: `/dl https://megaup.cc/...`", quote=True)
 
-        url = message.command[1]
-        await message.reply("🔍 Fetching available qualities...")
-
-        files = await get_download_options(url)
-        if not files:
-            return await message.reply("❌ No downloadable resolutions found.")
-
-        # Build buttons
-        buttons = [
-            [InlineKeyboardButton(f"📥 {f['quality']} - {f['size']}", callback_data=f"dl::{f['url']}::{f['filename']}")]
-            for f in files
-        ]
-        buttons.append([InlineKeyboardButton("⬇️ Download All", callback_data="dl_all")])
-
-        await message.reply("🎬 Select quality to download:", reply_markup=InlineKeyboardMarkup(buttons))
-
-        # Save download queue for this user
-        message.request_data = files
-
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-
-# Handle button clicks
-@app.on_callback_query()
-async def handle_download_button(client, callback_query):
-    data = callback_query.data
-
-    if data.startswith("dl::"):
-        _, url, filename = data.split("::", 2)
-        await callback_query.message.edit_text(f"⬇️ Downloading `{filename}`...")
-
-        filepath = await download_file(url, filename, callback_query.message)
-        if not filepath:
-            return await callback_query.message.edit_text("❌ Download failed.")
-
-        await callback_query.message.edit_text("📤 Uploading to Telegram...")
-        await callback_query.message.reply_document(
-            document=filepath,
-            file_name=os.path.basename(filepath)
-        )
-        os.remove(filepath)
-        await callback_query.message.delete()
-
-    elif data == "dl_all":
-        await callback_query.answer("⚙️ Downloading all (not implemented fully yet)", show_alert=True)
-        # Optionally implement full download queue
-
-# Get resolution options using Playwright
-
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-import time
-
-def get_download_options(url: str):
-    chrome_options = Options()
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--disable-infobars")
-    chrome_options.add_argument("--start-maximized")
-
-    # Optional: Set user-agent
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36")
-
-    driver = webdriver.Chrome(options=chrome_options)
-
-    try:
-        driver.get(url)
-
-        # Wait for resolution cards to load
-        time.sleep(5)
-
-        cards = driver.find_elements(By.CSS_SELECTOR, "div[class*=col-lg]")
-
-        results = []
-
-        for card in cards:
-            try:
-                if "Resolution" not in card.text:
-                    continue
-                quality = card.find_element(By.XPATH, ".//span[contains(text(), 'Resolution')]/following-sibling::strong").text
-                size = card.find_element(By.XPATH, ".//span[contains(text(), 'Size')]/following-sibling::strong").text
-
-                # Click the quality to trigger countdown
-                card.click()
-                print(f"🕒 Waiting 35s for {quality} to finish countdown...")
-                time.sleep(35)
-
-                # After countdown, download button should appear inside the same card
-                dl_button = card.find_element(By.XPATH, ".//a[contains(text(), 'Download')]")
-                href = dl_button.get_attribute("href")
-                filename = href.split("/")[-1]
-
-                results.append({
-                    "quality": quality.strip(),
-                    "size": size.strip(),
-                    "url": href.strip(),
-                    "filename": filename
-                })
-
-                break  # remove this break if you want to get multiple resolutions
-
-            except Exception as e:
-                print(f"⚠️ Skipping one card: {e}")
-                continue
-
-        driver.quit()
-        return results
-
-    except Exception as e:
-        driver.quit()
-        print(f"❌ Error: {e}")
-        return []
-
-
-# Download file with aiohttp and progress
+# --- Download File with Progress ---
 async def download_file(url: str, filename: str, message: Message):
     save_path = os.path.join(DOWNLOAD_DIR, filename)
     try:
@@ -416,6 +299,108 @@ async def download_file(url: str, filename: str, message: Message):
     except Exception as e:
         print("Download Error:", e)
         return None
+
+# --- Selenium Download Link Extractor ---
+async def get_download_options(url: str):
+    chrome_options = Options()
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_argument("--disable-infobars")
+    chrome_options.add_argument("--start-maximized")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36")
+
+    # Use a temp directory for user data to avoid session conflict
+    temp_user_data = tempfile.mkdtemp()
+    chrome_options.add_argument(f"--user-data-dir={temp_user_data}")
+
+    driver = webdriver.Chrome(options=chrome_options)
+
+    try:
+        driver.get(url)
+        time.sleep(5)  # wait for the page to load
+
+        cards = driver.find_elements(By.CSS_SELECTOR, "div[class*=col-lg]")
+
+        results = []
+
+        for card in cards:
+            try:
+                if "Resolution" not in card.text:
+                    continue
+
+                quality = card.find_element(By.XPATH, ".//span[contains(text(), 'Resolution')]/following-sibling::strong").text
+                size = card.find_element(By.XPATH, ".//span[contains(text(), 'Size')]/following-sibling::strong").text
+
+                # Click to trigger countdown
+                card.click()
+                print(f"🕒 Waiting 35s for {quality} to unlock...")
+                time.sleep(35)
+
+                dl_button = card.find_element(By.XPATH, ".//a[contains(text(), 'Download')]")
+                href = dl_button.get_attribute("href")
+                filename = href.split("/")[-1]
+
+                results.append({
+                    "quality": quality.strip(),
+                    "size": size.strip(),
+                    "url": href.strip(),
+                    "filename": filename
+                })
+
+            except Exception as e:
+                print(f"⚠️ Error with one card: {e}")
+                continue
+
+        driver.quit()
+        return results
+    except Exception as e:
+        driver.quit()
+        print(f"❌ Error: {e}")
+        return []
+
+# --- /dl Command ---
+@app.on_message(filters.command("dl") & filters.private)
+async def dl_handler(client: Client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply("❗ Send a MegaUp link.\nExample: `/dl https://megaup.cc/...`", quote=True)
+
+    url = message.command[1]
+    await message.reply("🔍 Fetching qualities... This may take a moment.")
+
+    files = await get_download_options(url)
+    if not files:
+        return await message.reply("❌ No downloadable resolutions found.")
+
+    # Save to user-specific context (for demo, use message.chat.id as key if needed)
+    message.request_data = files
+
+    buttons = [
+        [InlineKeyboardButton(f"📥 {f['quality']} - {f['size']}", callback_data=f"dl::{f['url']}::{f['filename']}")]
+        for f in files
+    ]
+    buttons.append([InlineKeyboardButton("⬇️ Download All", callback_data="dl_all")])
+
+    await message.reply("🎬 Select quality to download:", reply_markup=InlineKeyboardMarkup(buttons))
+
+# --- Button Handler ---
+@app.on_callback_query()
+async def handle_download_button(client, callback_query):
+    data = callback_query.data
+
+    if data.startswith("dl::"):
+        _, url, filename = data.split("::", 2)
+        await callback_query.message.edit_text(f"⬇️ Downloading `{filename}`...")
+
+        filepath = await download_file(url, filename, callback_query.message)
+        if not filepath:
+            return await callback_query.message.edit_text("❌ Download failed.")
+
+        await callback_query.message.edit_text("📤 Uploading to Telegram...")
+        await callback_query.message.reply_document(document=filepath, file_name=os.path.basename(filepath))
+        os.remove(filepath)
+        await callback_query.message.delete()
+
+    elif data == "dl_all":
+        await callback_query.answer("⚙️ 'Download All' not yet implemented.", show_alert=True)
 
 
 # ---------------- RUN BOT ---------------- #
