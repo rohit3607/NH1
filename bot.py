@@ -310,8 +310,10 @@ async def get_download_options(url: str):
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36")
 
     # Use a temp directory for user data to avoid session conflict
-    temp_user_data = tempfile.mkdtemp()
-    chrome_options.add_argument(f"--user-data-dir={temp_user_data}")
+    #temp_user_data = tempfile.mkdtemp()
+    profile_path = tempfile.mkdtemp() options = webdriver.ChromeOptions()
+options.add_argument(f"--user-data-dir={profile_path}")
+#chrome_options.add_argument(f"--user-data-dir={temp_user_data}")
 
     driver = webdriver.Chrome(options=chrome_options)
 
