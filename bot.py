@@ -311,7 +311,8 @@ async def get_download_options(url: str):
 
     # Use a temp directory for user data to avoid session conflict
     #temp_user_data = tempfile.mkdtemp()
-    profile_path = tempfile.mkdtemp() options = webdriver.ChromeOptions()
+    profile_path = tempfile.mkdtemp() 
+options = webdriver.ChromeOptions()
 options.add_argument(f"--user-data-dir={profile_path}")
 #chrome_options.add_argument(f"--user-data-dir={temp_user_data}")
 
