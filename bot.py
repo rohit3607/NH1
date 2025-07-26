@@ -10,6 +10,8 @@ import aiohttp
 import json
 import pyromod.listen
 from pyrogram import Client, filters
+from pyrogram.errors import FloodWait
+from time import time
 from pyrogram.enums import ParseMode
 from pyrogram.types import (
     Message, CallbackQuery, InlineQueryResultArticle,
@@ -262,5 +264,147 @@ async def update_bot(client, message):
 
 
 # ---------------- RUN BOT ---------------- #
+
+
+user_file_cache = {}
+
+# 🧠 Format size in human-readable form
+def sizeof_fmt(num, suffix="B"):
+    for unit in ["", "K", "M", "G"]:
+        if abs(num) < 1024:
+            return f"{num:.1f}{unit}{suffix}"
+        num /= 1024
+    return f"{num:.1f}T{suffix}"
+
+# ⬇️ Parse file qualities and sizes
+async def parse_megaup_links(url):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as res:
+            html = await res.text()
+
+    soup = BeautifulSoup(html, "html.parser")
+    script_text = soup.find("script", text=re.compile("sources")).text
+    files = re.findall(r'\{file:"(.*?)",label:"(.*?)"\}', script_text)
+
+    result = []
+    async with aiohttp.ClientSession() as session:
+        for file_url, label in files:
+            async with session.head(file_url) as r:
+                size = int(r.headers.get("Content-Length", 0))
+                result.append((file_url, label, size))
+    return result
+
+# ⬇️ Progress updater
+async def progress(current, total, message, prefix="Uploading"):
+    percentage = current * 100 / total
+    bar = "█" * int(percentage / 10) + "░" * (10 - int(percentage / 10))
+    try:
+        await message.edit_text(
+            f"{prefix}...\n[{bar}] {percentage:.2f}%\n{sizeof_fmt(current)} / {sizeof_fmt(total)}"
+        )
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+
+# ⬇️ Download file with progress
+async def download_with_progress(url, label, temp_msg):
+    filename = f"/tmp/{label.replace(' ', '_')}.mp4"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as res:
+                total = int(res.headers.get('Content-Length', 0))
+                downloaded = 0
+                with open(filename, "wb") as f:
+                    async for chunk in res.content.iter_chunked(1024 * 512):
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        await progress(downloaded, total, temp_msg, prefix="Downloading")
+        return filename
+    except Exception as e:
+        await temp_msg.edit_text(f"❌ Failed to download: {e}")
+        return None
+
+# ⬆️ Upload with progress
+async def upload_with_progress(client, message, file_path, label):
+    total = os.path.getsize(file_path)
+    sent_msg = await message.reply("📤 Starting upload...")
+
+    async def update(current, total):
+        await progress(current, total, sent_msg, prefix="Uploading")
+
+    await client.send_document(
+        message.chat.id,
+        document=file_path,
+        file_name=os.path.basename(file_path),
+        caption=f"🎬 {label}",
+        progress=update,
+        progress_args=(total,),
+    )
+    await sent_msg.delete()
+
+# 📥 Trigger download after 30s and send
+async def download_and_send(client, message, url, label):
+    await message.reply(f"⏳ Waiting 30s before downloading **{label}**...")
+    await asyncio.sleep(30)
+
+    progress_msg = await message.reply("🔁 Initializing download...")
+    file_path = await download_with_progress(url, label, progress_msg)
+
+    if file_path:
+        await upload_with_progress(client, message, file_path, label)
+        os.remove(file_path)
+
+# 🧠 /dl command handler
+@app.on_message(filters.command("dl") & filters.private)
+async def handle_dl(client: Client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply("❌ Usage: `/dl <MegaUp link>`")
+
+    url = message.command[1]
+    if "megaup.cc" not in url:
+        return await message.reply("❌ Invalid MegaUp link.")
+
+    try:
+        files = await parse_megaup_links(url)
+        if not files:
+            return await message.reply("❌ No downloadable files found.")
+
+        user_file_cache[message.from_user.id] = files
+
+        buttons = [
+            [InlineKeyboardButton(f"📥 {label} ({sizeof_fmt(size)})", callback_data=f"dl_{i}")]
+            for i, (_, label, size) in enumerate(files)
+        ]
+        buttons.append([InlineKeyboardButton("📦 Download All", callback_data="dl_all")])
+
+        await message.reply("🎬 Choose quality to download:", reply_markup=InlineKeyboardMarkup(buttons))
+
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
+# 🧠 Handle button clicks
+@app.on_callback_query(filters.regex(r"^dl_"))
+async def handle_button(client: Client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    data = callback.data
+
+    if user_id not in user_file_cache:
+        return await callback.answer("⚠️ Session expired. Please try again.", show_alert=True)
+
+    files = user_file_cache[user_id]
+    await callback.answer()
+
+    if data == "dl_all":
+        for url, label, _ in files:
+            await download_and_send(client, callback.message, url, label)
+    else:
+        index = int(data.replace("dl_", ""))
+        if index >= len(files):
+            return await callback.message.reply("❌ Invalid selection.")
+
+        url, label, _ = files[index]
+        await download_and_send(client, callback.message, url, label)
+
+# ---------------- RUN BOT ---------------- #
+
 if __name__ == "__main__":
     app.run()
