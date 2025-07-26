@@ -120,35 +120,46 @@ async def parse_megaup_page(client, message, url):
         html = scraper.get(url).text
         soup = BeautifulSoup(html, "html.parser")
 
-        file_table = soup.find("table", {"class": "table"})
-        if not file_table:
-            return await message.reply("❌ Could not find file info.")
+        # Sometimes there's only one button with id="downloadButton"
+        direct_button = soup.find("a", {"id": "downloadButton"})
+        if direct_button and direct_button.has_attr("href"):
+            file_name = soup.find("span", class_="filename")
+            file_size = soup.find("span", class_="filesize")
+            name = file_name.text.strip() if file_name else "Unknown"
+            size = file_size.text.strip() if file_size else "Unknown"
+            buttons = [[InlineKeyboardButton(f"📥 {name} ({size})", callback_data=f"wait30|{url}|{name}")]]
+            return await message.reply(
+                f"<b>📄 File:</b> <code>{name}</code>\n<b>📦 Size:</b> <code>{size}</code>",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
 
-        rows = file_table.find_all("tr")[1:]  # skip header
+        # If multiple quality/links are available, we look for divs or a tags inside link containers
+        all_buttons = soup.find_all("a", href=re.compile(r"^/download/\w+/\w+"))
+        if not all_buttons:
+            return await message.reply("❌ No downloadable links found.")
+
         buttons = []
-        all_links = []
+        caption = "<b>📄 Available Downloads:</b>\n\n"
+        all_files = []
 
-        caption = "<b>📄 Available Files:</b>\n\n"
-
-        for i, row in enumerate(rows):
-            cols = row.find_all("td")
-            file_name = cols[0].text.strip()
-            size = cols[1].text.strip()
-            wait_url = cols[2].find("a")["href"]  # the link triggers countdown
-
-            caption += f"{i+1}. <code>{file_name}</code> | <b>{size}</b>\n"
-            buttons.append([InlineKeyboardButton(f"📥 {file_name} ({size})", callback_data=f"wait30|{wait_url}|{file_name}")])
-            all_links.append((wait_url, file_name))
+        for btn in all_buttons:
+            name = btn.text.strip()
+            link = "https://megaup.cc" + btn["href"]
+            caption += f"• <code>{name}</code>\n"
+            buttons.append([InlineKeyboardButton(f"📥 {name}", callback_data=f"wait30|{link}|{name}")])
+            all_files.append((link, name))
 
         # Add Download All
         buttons.append([InlineKeyboardButton("📦 Download All", callback_data=json.dumps({
             "all": True,
-            "files": all_links
+            "files": all_files
         }))])
 
         await message.reply(caption, reply_markup=InlineKeyboardMarkup(buttons))
+
     except Exception as e:
-        await message.reply(f"❌ Error: {e}")
+        await message.reply(f"❌ Error parsing MegaUp link: {e}")
+
 
 @app.on_callback_query(filters.regex(r"wait30\|"))
 async def handle_wait_30(client, query: CallbackQuery):
