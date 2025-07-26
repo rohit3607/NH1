@@ -105,6 +105,98 @@ async def start_command(_, message: Message):
     )
 
 # ---------------- INLINE SEARCH ---------------- #
+@app.on_message(filters.command("download") & filters.private)
+async def megaup_handler(client, message: Message):
+    urls = re.findall(r'https?://megaup\.cc/download/\S+', message.text)
+    if not urls:
+        return await message.reply("❌ No valid MegaUp link found.")
+    
+    for url in urls:
+        await parse_megaup_page(client, message, url)
+
+async def parse_megaup_page(client, message, url):
+    scraper = cloudscraper.create_scraper()
+    try:
+        html = scraper.get(url).text
+        soup = BeautifulSoup(html, "html.parser")
+
+        file_table = soup.find("table", {"class": "table"})
+        if not file_table:
+            return await message.reply("❌ Could not find file info.")
+
+        rows = file_table.find_all("tr")[1:]  # skip header
+        buttons = []
+        all_links = []
+
+        caption = "<b>📄 Available Files:</b>\n\n"
+
+        for i, row in enumerate(rows):
+            cols = row.find_all("td")
+            file_name = cols[0].text.strip()
+            size = cols[1].text.strip()
+            wait_url = cols[2].find("a")["href"]  # the link triggers countdown
+
+            caption += f"{i+1}. <code>{file_name}</code> | <b>{size}</b>\n"
+            buttons.append([InlineKeyboardButton(f"📥 {file_name} ({size})", callback_data=f"wait30|{wait_url}|{file_name}")])
+            all_links.append((wait_url, file_name))
+
+        # Add Download All
+        buttons.append([InlineKeyboardButton("📦 Download All", callback_data=json.dumps({
+            "all": True,
+            "files": all_links
+        }))])
+
+        await message.reply(caption, reply_markup=InlineKeyboardMarkup(buttons))
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+
+@app.on_callback_query(filters.regex(r"wait30\|"))
+async def handle_wait_30(client, query: CallbackQuery):
+    _, wait_url, file_name = query.data.split("|", 2)
+    msg = await query.message.reply(f"⏳ Waiting 30 seconds for <code>{file_name}</code>...")
+
+    for i in range(30, 0, -5):
+        await msg.edit_text(f"⏳ Waiting... {i}s remaining for <code>{file_name}</code>")
+        await asyncio.sleep(5)
+
+    await msg.edit_text("🔍 Fetching final download link...")
+
+    # now get the direct download link
+    try:
+        scraper = cloudscraper.create_scraper()
+        html = scraper.get(wait_url).text
+        soup = BeautifulSoup(html, "html.parser")
+        final_link = soup.find("a", {"id": "downloadButton"})["href"]
+
+        await msg.edit_text("📥 Starting download...")
+        await send_downloaded_file(client, query.from_user.id, final_link, file_name)
+    except Exception as e:
+        await msg.edit(f"❌ Failed to extract final link: {e}")
+
+@app.on_callback_query()
+async def handle_callback_json(client, query: CallbackQuery):
+    try:
+        data = json.loads(query.data)
+        if not data.get("all"):
+            return
+
+        files = data["files"]
+        await query.message.reply(f"📦 Starting download of {len(files)} files...")
+
+        for wait_url, file_name in files:
+            msg = await query.message.reply(f"⏳ Starting: {file_name}")
+            await asyncio.sleep(30)
+            try:
+                scraper = cloudscraper.create_scraper()
+                html = scraper.get(wait_url).text
+                soup = BeautifulSoup(html, "html.parser")
+                final_link = soup.find("a", {"id": "downloadButton"})["href"]
+                await send_downloaded_file(client, query.from_user.id, final_link, file_name)
+                await msg.delete()
+            except Exception as e:
+                await msg.edit(f"❌ Failed for {file_name}: {e}")
+    except:
+        pass
 
 # ---------------- UPDATE CMD ---------------- #
 
