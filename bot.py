@@ -149,7 +149,7 @@ async def search_nhentai(query=None, page=1):
             )
     else:
         # ✅ Use API for latest
-        api_url = f"https://nhentai.net/api/galleries/all?page={page}"
+        api_url = f"https://nhentai.net/?page={page}"
         async with aiohttp.ClientSession() as session:
             async with session.get(api_url) as response:
                 if response.status != 200:
