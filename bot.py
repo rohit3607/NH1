@@ -10,8 +10,6 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-import cloudscraper
-#from playwright.async_api import async_playwright
 import aiohttp
 import json
 import pyromod.listen
@@ -116,7 +114,10 @@ async def inline_search(client: Client, inline_query):
 
 async def search_nhentai(query=None, page=1):
     results = []
-    url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}" if query else f"https://nhentai.net/?page={page}"
+    if query:
+        url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
+    else:
+        url = f"https://nhentai.net/language/english/?page={page}"  # ✅ FIX
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -162,7 +163,7 @@ async def download_page(session, url, filename):
 
 # ---------------- PDF GENERATOR ---------------- #
 async def download_manga_as_pdf(code, progress_callback=None):
-    api_url = f"https://nhentai.net/api/gallery/{code}"
+    api_url = f"https://nhentai.to/api/gallery/{code}"  # ✅ FIXED DOMAIN
     folder = f"nhentai_{code}"
     os.makedirs(folder, exist_ok=True)
 
@@ -206,7 +207,7 @@ async def download_manga_as_pdf(code, progress_callback=None):
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
     pdf_path = None
-    msg = None  # <== FIX: define msg early to avoid UnboundLocalError
+    msg = None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
@@ -250,8 +251,6 @@ async def handle_download(client: Client, callback: CallbackQuery):
             os.remove(pdf_path)
 
 # ---------------- UPDATE CMD ---------------- #
-
-
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
 async def update_bot(client, message):
     msg = await message.reply_text("🔄 Pulling updates from GitHub...")
@@ -269,6 +268,5 @@ async def update_bot(client, message):
         await msg.edit(f"⚠️ Error: {e}")
 
 # ---------------- RUN BOT ---------------- #
-
 if __name__ == "__main__":
     app.run()
