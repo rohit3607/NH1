@@ -12,6 +12,7 @@ from io import BytesIO
 import subprocess, sys
 import aiohttp
 import json
+import cloudscraper
 import pyromod.listen
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
@@ -163,23 +164,25 @@ async def download_page(session, url, filename):
 
 # ---------------- PDF GENERATOR ---------------- #
 async def download_manga_as_pdf(code, progress_callback=None):
-    api_url = f"https://nhentai.to/api/gallery/{code}"  # ✅ FIXED DOMAIN
+    # ✅ Use cloudscraper for API (bypasses Cloudflare)
+    scraper = cloudscraper.create_scraper()
+    api_url = f"https://nhentai.net/api/gallery/{code}"
+    resp = scraper.get(api_url)
+
+    if resp.status_code != 200:
+        raise Exception("Gallery not found.")
+    data = resp.json()
+
     folder = f"nhentai_{code}"
     os.makedirs(folder, exist_ok=True)
 
+    num_pages = len(data["images"]["pages"])
+    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
+    media_id = data["media_id"]
+    image_paths = []
+
     headers = {"User-Agent": "Mozilla/5.0"}
-
     async with aiohttp.ClientSession() as session:
-        async with session.get(api_url, headers=headers) as resp:
-            if resp.status != 200:
-                raise Exception("Gallery not found.")
-            data = await resp.json()
-
-        num_pages = len(data["images"]["pages"])
-        ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-        media_id = data["media_id"]
-        image_paths = []
-
         for i, page in enumerate(data["images"]["pages"], start=1):
             ext = ext_map.get(page["t"], "jpg")
             url = f"https://i.nhentai.net/galleries/{media_id}/{i}.{ext}"
@@ -189,7 +192,7 @@ async def download_manga_as_pdf(code, progress_callback=None):
             if progress_callback:
                 await progress_callback(i, num_pages, "Downloading")
 
-    # Generate PDF without loading all images in memory
+    # Generate PDF
     pdf_path = f"{folder}.pdf"
     first_img = Image.open(image_paths[0]).convert("RGB")
     with open(pdf_path, "wb") as f:
@@ -197,6 +200,7 @@ async def download_manga_as_pdf(code, progress_callback=None):
             Image.open(p).convert("RGB") for p in image_paths[1:]
         ])
 
+    # Cleanup
     for img in image_paths:
         os.remove(img)
     os.rmdir(folder)
