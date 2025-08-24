@@ -117,40 +117,64 @@ async def search_nhentai(query=None, page=1):
     results = []
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
-    else:
-        url = f"https://nhentai.net/language/english/?page={page}"  # ✅ FIX
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return []
+                html = await response.text()
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                return []
-            html = await response.text()
+        soup = BeautifulSoup(html, "html.parser")
+        gallery_items = soup.select(".gallery")
+        for item in gallery_items[:10]:
+            link = item.select_one("a")["href"]
+            code = link.split("/")[2]
+            title = item.select_one(".caption").text.strip() if item.select_one(".caption") else f"Code {code}"
+            thumb = item.select_one("img").get("data-src") or item.select_one("img").get("src")
+            if thumb.startswith("//"):
+                thumb = "https:" + thumb
 
-    soup = BeautifulSoup(html, "html.parser")
-    gallery_items = soup.select(".gallery")
-
-    for item in gallery_items[:10]:
-        link = item.select_one("a")["href"]
-        code = link.split("/")[2]
-        title = item.select_one(".caption").text.strip() if item.select_one(".caption") else f"Code {code}"
-        thumb = item.select_one("img").get("data-src") or item.select_one("img").get("src")
-        if thumb.startswith("//"):
-            thumb = "https:" + thumb
-
-        results.append(
-            InlineQueryResultArticle(
-                title=title,
-                description=f"Code: {code}",
-                thumb_url=thumb,
-                input_message_content=InputTextMessageContent(
-                    message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                    disable_web_page_preview=False
-                ),
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
-                ])
+            results.append(
+                InlineQueryResultArticle(
+                    title=title,
+                    description=f"Code: {code}",
+                    thumb_url=thumb,
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
+                        disable_web_page_preview=False
+                    ),
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
+                    ])
+                )
             )
-        )
+    else:
+        # ✅ Use API for latest
+        api_url = f"https://nhentai.net/api/galleries/all?page={page}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url) as response:
+                if response.status != 200:
+                    return []
+                data = await response.json()
+
+        for g in data.get("result", [])[:10]:
+            code = g["id"]
+            title = g["title"]["english"] or g["title"]["japanese"] or f"Code {code}"
+            thumb = f"https://t.nhentai.net/galleries/{g['media_id']}/cover.jpg"
+
+            results.append(
+                InlineQueryResultArticle(
+                    title=title,
+                    description=f"Code: {code}",
+                    thumb_url=thumb,
+                    input_message_content=InputTextMessageContent(
+                        message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
+                        disable_web_page_preview=False
+                    ),
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
+                    ])
+                )
+            )
     return results
 
 # ---------------- PAGE DOWNLOADER ---------------- #
