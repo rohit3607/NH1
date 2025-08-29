@@ -43,7 +43,6 @@ class Bot(Client):
     def __init__(self):
         super().__init__(
             name="nhentaiBot",
-        ...
             api_id=APP_ID,
             api_hash=API_HASH,
             bot_token=TG_BOT_TOKEN,
