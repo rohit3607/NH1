@@ -237,10 +237,8 @@ async def handle_download(client: Client, callback_query: CallbackQuery):
                 pass
 
         # ✅ Download manga PDF
-        pdf_path = await download_manga_as_pdf(
-            code,
-            lambda cur, total: asyncio.create_task(progress(cur, total, "Downloading"))
-        )
+        pdf_path = await download_manga_as_pdf(code, progress)
+        
 
         if msg:
             await msg.edit("📤 Uploading PDF...")
