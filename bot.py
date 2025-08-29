@@ -85,13 +85,7 @@ app = Bot()
 
 # -------------- START HANDLER -------------- #
 @app.on_message(filters.command('start') & filters.private)
-async def start_command(client, message: Message):
-    if message.text.startswith("/start dl_"):
-        # deep-link triggered
-        code = message.text.split("_", 1)[1]
-        await handle_download(client, message, code)
-        return
-
+async def start_command(_, message: Message):
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔎 Search Manga", switch_inline_query_current_chat="")],
         [InlineKeyboardButton("💻 Contact Developer", url="https://t.me/rohit_1888")]
@@ -114,13 +108,12 @@ async def inline_search(client: Client, inline_query):
     query = inline_query.query.strip()
     page = int(inline_query.offset) if inline_query.offset else 1
 
-    results = await search_nhentai(query or None, page, client.username)
+    results = await search_nhentai(query or None, page)
     next_offset = str(page + 1) if len(results) == 10 else ""
     await inline_query.answer(results, cache_time=1, is_personal=True, next_offset=next_offset)
 
-
-# -------------- INLINE SEARCH FUNC -------------- #
-async def search_nhentai(query=None, page=1, bot_username=None):
+# -------------- INLINE SEARCH FUNCTION -------------- #
+async def search_nhentai(query=None, page=1):
     results = []
     scraper = cloudscraper.create_scraper()
 
@@ -155,12 +148,11 @@ async def search_nhentai(query=None, page=1, bot_username=None):
                     disable_web_page_preview=True
                 ),
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📥 Download PDF", url=f"https://t.me/{bot_username}?start=dl_{code}")]
+                    [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
                 ])
             )
         )
     return results
-
 
 # ------------ PAGE DOWNLOADER -------------- #
 async def download_page(session, url, filename):
@@ -214,15 +206,17 @@ async def download_manga_as_pdf(code, progress_callback=None):
     os.rmdir(folder)
     return pdf_path
 
-
-# ------------ DOWNLOAD HANDLER ------------- #
-async def handle_download(client: Client, message: Message, code: str):
+# ------------ CALLBACK HANDLER ------------- #
+@app.on_callback_query(filters.regex(r"^download_(\d+)$"))
+async def handle_download(client: Client, callback: CallbackQuery):
+    code = callback.matches[0].group(1)
     pdf_path, msg, sent_photo, sent_pdf, thumb_path = None, None, None, None, None
-    chat_id = message.chat.id
 
     try:
+        chat_id = callback.message.chat.id if callback.message else callback.from_user.id
+
         # Always create a dedicated progress message
-        msg = await message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
+        msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
@@ -305,10 +299,15 @@ async def handle_download(client: Client, message: Message, code: str):
                     message_id=sent_pdf.id
                 )
 
-        # --- Remove progress message ---
+        # --- Remove progress + button message ---
         if msg:
             try:
-                await msg.delete()
+                await msg.delete()  # progress message
+            except:
+                pass
+        if callback.message:
+            try:
+                await callback.message.delete()  # original inline button
             except:
                 pass
 
@@ -318,7 +317,7 @@ async def handle_download(client: Client, message: Message, code: str):
             if msg:
                 await msg.edit(err)
             else:
-                await message.reply(err)
+                await callback.message.reply(err)
         except:
             pass
     finally:
