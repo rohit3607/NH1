@@ -209,9 +209,6 @@ async def download_manga_as_pdf(code, progress_callback=None):
     return pdf_path
 
 # ------------ CALLBACK HANDLER ------------- #
-from pyrogram.errors import FloodWait
-import asyncio
-
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
@@ -220,19 +217,23 @@ async def handle_download(client: Client, callback: CallbackQuery):
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
+        # ✅ Show initial progress
         if callback.message:
             msg = await callback.message.reply("📥 Starting download...")
         else:
             await callback.answer("📥 Starting download...")
 
+        # ✅ Progress handler
         async def progress(cur, total, stage):
-            percent = int((cur / total) * 100)
+            if not msg and not callback.message:
+                return
+            percent = int((cur / total) * 100) if total else 0
             txt = f"{stage}... {percent}%"
             try:
                 if msg:
                     await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
+                elif callback.message:
+                    await callback.message.edit_text(txt)
             except:
                 pass
 
@@ -242,10 +243,11 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         pdf_path = await download_manga_as_pdf(code, dl_progress)
 
+        # ✅ Update to uploading stage
         if msg:
             await msg.edit("📤 Uploading PDF... 0%")
-        else:
-            await callback.edit_message_text("📤 Uploading PDF... 0%")
+        elif callback.message:
+            await callback.message.edit_text("📤 Uploading PDF... 0%")
 
         # ✅ Upload with progress
         async def upload_progress(cur, total):
@@ -282,23 +284,28 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 message_id=sent_msg.id
             )
 
-        if msg:
-            await msg.delete()
-        elif callback.message:
-            try:
+        # ✅ Delete progress/callback message
+        try:
+            if msg:
+                await msg.delete()
+            elif callback.message:
                 await callback.message.delete()
-            except:
-                pass
-        #else:
-            #await callback.edit_message_text("✅ Done! PDF uploaded & copied.")
+        except:
+            pass
+
+        # ✅ Final confirmation popup (so user knows it’s done)
+        try:
+            await callback.answer("✅ PDF uploaded & copied!")
+        except:
+            pass
 
     except Exception as e:
         err = f"❌ Error: {e}"
         try:
             if msg:
                 await msg.edit(err)
-            else:
-                await callback.edit_message_text(err)
+            elif callback.message:
+                await callback.message.edit_text(err)
         except:
             pass
     finally:
