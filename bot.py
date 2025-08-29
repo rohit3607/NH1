@@ -208,6 +208,30 @@ async def download_manga_as_pdf(code, progress_callback=None):
     os.rmdir(folder)
     return pdf_path
 
+# ------------ THUMBNAIL ------------- #
+
+async def make_thumbnail(input_url: str, thumb_path: str):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(input_url) as resp:
+            if resp.status == 200:
+                data = await resp.read()
+                with open(thumb_path, "wb") as f:
+                    f.write(data)
+
+    # Open with Pillow and resize/compress
+    try:
+        img = Image.open(thumb_path)
+        img = img.convert("RGB")  # force JPEG compatible
+        img.thumbnail((320, 320))  # max size 320x320
+        thumb_path = thumb_path.rsplit(".", 1)[0] + ".jpg"
+        img.save(thumb_path, "JPEG", quality=85, optimize=True)
+    except Exception as e:
+        print("❌ Thumbnail processing failed:", e)
+        return None
+
+    return thumb_path
+
+
 # ------------ CALLBACK HANDLER ------------- #
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
@@ -249,12 +273,8 @@ async def handle_download(client: Client, callback: CallbackQuery):
         ext = ext_map.get(first_page["t"], "jpg")
         first_page_url = f"https://i.nhentai.net/galleries/{media_id}/1.{ext}"
 
-        thumb_path = f"thumb_{code}.{ext}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(first_page_url) as resp:
-                if resp.status == 200:
-                    with open(thumb_path, "wb") as f:
-                        f.write(await resp.read())
+        thumb_path = f"thumb_{code}.jpg"
+        thumb_path = await make_thumbnail(first_page_url, thumb_path)
 
         if msg:
             await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
