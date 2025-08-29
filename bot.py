@@ -117,11 +117,10 @@ async def inline_search(client: Client, inline_query):
 async def search_nhentai(query=None, page=1):
     results = []
 
-    # ✅ If no query, use empty search (homepage feed)
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
     else:
-        url = f"https://nhentai.net/search/?q=&page={page}"
+        url = f"https://nhentai.net/?page={page}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -133,11 +132,14 @@ async def search_nhentai(query=None, page=1):
     gallery_items = soup.select(".gallery")
 
     for item in gallery_items[:10]:
-        link = item.select_one("a")["href"]
+        link = item.select_one("a.cover")["href"]
         code = link.split("/")[2]
         title = item.select_one(".caption").text.strip() if item.select_one(".caption") else f"Code {code}"
-        thumb = item.select_one("img").get("data-src") or item.select_one("img").get("src")
-        if thumb.startswith("//"):
+
+        # ✅ Always prefer data-src (real thumbnail), ignore placeholder src
+        img_tag = item.select_one("img")
+        thumb = img_tag.get("data-src") or img_tag.get("src")
+        if thumb and thumb.startswith("//"):
             thumb = "https:" + thumb
 
         results.append(
