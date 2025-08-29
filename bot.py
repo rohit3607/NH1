@@ -239,19 +239,19 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         pdf_path = await download_manga_as_pdf(code, dl_progress)
 
-        # --- Download Cover (for thumbnail) ---
+        # --- Get first page as thumbnail ---
         scraper = cloudscraper.create_scraper()
         api_url = f"https://nhentai.net/api/gallery/{code}"
         data = scraper.get(api_url).json()
         media_id = data["media_id"]
-        cover = data["images"]["cover"]
+        first_page = data["images"]["pages"][0]   # use 1st page instead of cover
         ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-        cover_ext = ext_map.get(cover["t"], "jpg")
-        cover_url = f"https://i.nhentai.net/galleries/{media_id}/cover.{cover_ext}"
+        ext = ext_map.get(first_page["t"], "jpg")
+        first_page_url = f"https://i.nhentai.net/galleries/{media_id}/1.{ext}"
 
-        thumb_path = f"thumb_{code}.{cover_ext}"
+        thumb_path = f"thumb_{code}.{ext}"
         async with aiohttp.ClientSession() as session:
-            async with session.get(cover_url) as resp:
+            async with session.get(first_page_url) as resp:
                 if resp.status == 200:
                     with open(thumb_path, "wb") as f:
                         f.write(await resp.read())
