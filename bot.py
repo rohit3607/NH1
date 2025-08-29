@@ -209,11 +209,13 @@ async def download_manga_as_pdf(code, progress_callback=None):
     return pdf_path
 
 # ------------ CALLBACK HANDLER ------------- #
+from pyrogram.errors import FloodWait
+import asyncio, os
+
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-    pdf_path = None
-    msg = None
+    pdf_path, msg, sent_msg = None, None, None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
@@ -234,18 +236,53 @@ async def handle_download(client: Client, callback: CallbackQuery):
             except:
                 pass
 
-        pdf_path = await download_manga_as_pdf(code, progress)
+        # ✅ Download PDF
+        pdf_path = await download_manga_as_pdf(code, lambda cur, total: progress(cur, total, "📥 Downloading"))
 
         if msg:
-            await msg.edit("📤 Uploading PDF...")
+            await msg.edit("📤 Uploading PDF... 0%")
         else:
-            await callback.edit_message_text("📤 Uploading PDF...")
+            await callback.edit_message_text("📤 Uploading PDF... 0%")
 
-        # ✅ Send to user
-        await client.send_document(chat_id, document=pdf_path, caption=f"📖 Manga: {code}")
+        # ✅ Upload once with progress
+        async def upload_progress(cur, total):
+            await progress(cur, total, "📤 Uploading")
 
-        # ✅ Copy to channel
-        await client.send_document(-1002805198226, document=pdf_path, caption=f"📖 Manga: {code}")
+        try:
+            sent_msg = await client.send_document(
+                chat_id,
+                document=pdf_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            sent_msg = await client.send_document(
+                chat_id,
+                document=pdf_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
+
+        # ✅ Copy to channel (no re-upload)
+        try:
+            await client.copy_message(
+                chat_id=-1002805198226,   # channel ID
+                from_chat_id=chat_id,
+                message_id=sent_msg.id
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await client.copy_message(
+                chat_id=-1002805198226,
+                from_chat_id=chat_id,
+                message_id=sent_msg.id
+            )
+
+        if msg:
+            await msg.edit("✅ Done! PDF uploaded & copied.")
+        else:
+            await callback.edit_message_text("✅ Done! PDF uploaded & copied.")
 
     except Exception as e:
         err = f"❌ Error: {e}"
