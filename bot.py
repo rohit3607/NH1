@@ -215,56 +215,109 @@ async def download_manga_as_pdf(code, progress_callback=None):
     return pdf_path, thumb_path
 
 # ------------ CALLBACK HANDLER ------------- #
+
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
+
+    # ⚡ Always answer callback (important!)
+    try:
+        await callback.answer("⏳ Fetching manga...", show_alert=False)
+    except FloodWait as e:
+        await asyncio.sleep(e.value)
+        await callback.answer("⏳ Fetching manga...", show_alert=False)
+
     pdf_path = thumb_path = None
     msg = None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
-        msg = await callback.message.reply("📥 Starting download...")
 
+        try:
+            msg = await callback.message.reply("📥 Starting download...")
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            msg = await callback.message.reply("📥 Starting download...")
+
+        # Progress callback
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
                 await msg.edit(txt)
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await msg.edit(txt)
             except:
                 pass
 
+        # ✅ Download PDF
         pdf_path, thumb_path = await download_manga_as_pdf(code, progress)
 
-        await msg.edit("📤 Uploading PDF...")
+        try:
+            await msg.edit("📤 Uploading PDF...")
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await msg.edit("📤 Uploading PDF...")
 
+        # Upload progress callback
         async def upload_progress(cur, total):
             percent = int((cur / total) * 100)
             try:
                 await msg.edit(f"📤 Uploading... {percent}%")
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await msg.edit(f"📤 Uploading... {percent}%")
             except:
                 pass
 
-        # ✅ Send to user with thumbnail + progress
-        await client.send_document(
-            chat_id,
-            document=pdf_path,
-            thumb=thumb_path,
-            caption=f"📖 Manga: {code}",
-            progress=upload_progress
-        )
+        # ✅ Upload to user
+        try:
+            await client.send_document(
+                chat_id,
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await client.send_document(
+                chat_id,
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
 
-        # ✅ Copy to channel
-        await client.send_document(
-            -1002805198226,
-            document=pdf_path,
-            thumb=thumb_path,
-            caption=f"📖 Manga: {code}"
-        )
+        # ✅ Upload to your log/channel
+        try:
+            await client.send_document(
+                -1002805198226,  # your log channel
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}"
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await client.send_document(
+                -1002805198226,
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}"
+            )
 
-        await msg.edit("✅ Done!")
+        try:
+            await msg.edit("✅ Done!")
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await msg.edit("✅ Done!")
 
     except Exception as e:
         try:
+            await msg.edit(f"❌ Error: {e}")
+        except FloodWait as e2:
+            await asyncio.sleep(e2.value)
             await msg.edit(f"❌ Error: {e}")
         except:
             pass
