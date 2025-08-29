@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-import aiohttp
+import aiohttp, aiofiles
 import json
 import cloudscraper
 import pyromod.listen
@@ -211,6 +211,7 @@ async def download_manga_as_pdf(code, progress_callback=None):
 # ------------ THUMBNAIL ------------- #
 
 async def make_thumbnail(input_url: str, thumb_path: str):
+    # Download first page
     async with aiohttp.ClientSession() as session:
         async with session.get(input_url) as resp:
             if resp.status == 200:
@@ -220,25 +221,26 @@ async def make_thumbnail(input_url: str, thumb_path: str):
 
     try:
         img = Image.open(thumb_path).convert("RGB")
-
-        # --- Center crop to square only (no resize) ---
         w, h = img.size
-        min_side = min(w, h)
-        left = (w - min_side) // 2
-        top = (h - min_side) // 2
-        right = left + min_side
-        bottom = top + min_side
-        img = img.crop((left, top, right, bottom))
 
-        # Save directly, no resize, max quality
-        thumb_path = thumb_path.rsplit(".", 1)[0] + ".jpg"
+        # If Telegram rejects non-square thumbs, crop center to square
+        if w != h:
+            min_side = min(w, h)
+            left = (w - min_side) // 2
+            top = (h - min_side) // 2
+            right = left + min_side
+            bottom = top + min_side
+            img = img.crop((left, top, right, bottom))
+
+        # Save as high-quality JPEG (Telegram loves JPEGs for thumbs)
+        thumb_path = os.path.splitext(thumb_path)[0] + ".jpg"
         img.save(thumb_path, "JPEG", quality=95, optimize=True)
+
     except Exception as e:
         print("❌ Thumbnail processing failed:", e)
         return None
 
     return thumb_path
-
 
 # ------------ CALLBACK HANDLER ------------- #
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
