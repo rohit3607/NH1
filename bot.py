@@ -279,6 +279,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 message_id=sent_msg.id
             )
 
+        # ✅ Delete progress message after upload is done
         if msg:
             await msg.delete()
         elif callback.message:
