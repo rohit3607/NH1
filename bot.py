@@ -117,7 +117,7 @@ async def inline_search(client: Client, inline_query):
 # ---------------- INLINE SEARCH ---------------- #
 async def search_nhentai(query=None, page=1):
     results = []
-    scraper = cloudscraper.create_scraper()  # ✅ bypass Cloudflare
+    scraper = cloudscraper.create_scraper() 
 
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
@@ -146,7 +146,7 @@ async def search_nhentai(query=None, page=1):
                 thumb_url=thumb,
                 input_message_content=InputTextMessageContent(
                     message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                    disable_web_page_preview=False
+                    disable_web_page_preview=True
                 ),
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
@@ -166,11 +166,9 @@ async def download_page(session, url, filename):
 
 # -------------- PDF GENERATOR -------------- #
 async def download_manga_as_pdf(code, progress_callback=None):
-    # ✅ Use cloudscraper for API (bypasses Cloudflare)
     scraper = cloudscraper.create_scraper()
     api_url = f"https://nhentai.net/api/gallery/{code}"
     resp = scraper.get(api_url)
-
     if resp.status_code != 200:
         raise Exception("Gallery not found.")
     data = resp.json()
@@ -202,63 +200,79 @@ async def download_manga_as_pdf(code, progress_callback=None):
             Image.open(p).convert("RGB") for p in image_paths[1:]
         ])
 
-    # Cleanup
+    # ✅ Cover thumbnail
+    thumb_url = f"https://t.nhentai.net/galleries/{media_id}/cover.jpg"
+    thumb_path = os.path.join(folder, "thumb.jpg")
+    scraper.get(thumb_url, stream=True).raw.decode_content = True
+    with open(thumb_path, "wb") as f:
+        f.write(scraper.get(thumb_url).content)
+
+    # Cleanup pages
     for img in image_paths:
         os.remove(img)
     os.rmdir(folder)
-    return pdf_path
+
+    return pdf_path, thumb_path
 
 # ------------ CALLBACK HANDLER ------------- #
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-    pdf_path = None
+    pdf_path = thumb_path = None
     msg = None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
-
-        if callback.message:
-            msg = await callback.message.reply("📥 Starting download...")
-        else:
-            await callback.answer("📥 Starting download...")
+        msg = await callback.message.reply("📥 Starting download...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
-                if msg:
-                    await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
+                await msg.edit(txt)
             except:
                 pass
 
-        pdf_path = await download_manga_as_pdf(code, progress)
+        pdf_path, thumb_path = await download_manga_as_pdf(code, progress)
 
-        if msg:
-            await msg.edit("📤 Uploading PDF...")
-        else:
-            await callback.edit_message_text("📤 Uploading PDF...")
+        await msg.edit("📤 Uploading PDF...")
 
-        # ✅ Send to user
-        await client.send_document(chat_id, document=pdf_path, caption=f"📖 Manga: {code}")
+        async def upload_progress(cur, total):
+            percent = int((cur / total) * 100)
+            try:
+                await msg.edit(f"📤 Uploading... {percent}%")
+            except:
+                pass
+
+        # ✅ Send to user with thumbnail + progress
+        await client.send_document(
+            chat_id,
+            document=pdf_path,
+            thumb=thumb_path,
+            caption=f"📖 Manga: {code}",
+            progress=upload_progress
+        )
 
         # ✅ Copy to channel
-        await client.send_document(-1002805198226, document=pdf_path, caption=f"📖 Manga: {code}")
+        await client.send_document(
+            -1002805198226,
+            document=pdf_path,
+            thumb=thumb_path,
+            caption=f"📖 Manga: {code}"
+        )
+
+        await msg.edit("✅ Done!")
 
     except Exception as e:
-        err = f"❌ Error: {e}"
         try:
-            if msg:
-                await msg.edit(err)
-            else:
-                await callback.edit_message_text(err)
+            await msg.edit(f"❌ Error: {e}")
         except:
             pass
     finally:
         if pdf_path and os.path.exists(pdf_path):
             os.remove(pdf_path)
+        if thumb_path and os.path.exists(thumb_path):
+            os.remove(thumb_path)
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
