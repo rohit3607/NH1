@@ -271,7 +271,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 sent_msg = await client.send_document(
                     LOG_CHANNEL,
                     document=pdf_path,
-                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    thumb=thumb_path,
                     caption=f"📖 Manga: {code}",
                     progress=upload_progress
                 )
@@ -280,7 +280,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 sent_msg = await client.send_document(
                     LOG_CHANNEL,
                     document=pdf_path,
-                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    thumb=thumb_path,
                     caption=f"📖 Manga: {code}",
                     progress=upload_progress
                 )
@@ -306,7 +306,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 sent_msg = await client.send_document(
                     chat_id,
                     document=pdf_path,
-                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    thumb=thumb_path,
                     caption=f"📖 Manga: {code}",
                     progress=upload_progress
                 )
@@ -315,7 +315,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 sent_msg = await client.send_document(
                     chat_id,
                     document=pdf_path,
-                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    thumb=thumb_path,
                     caption=f"📖 Manga: {code}",
                     progress=upload_progress
                 )
