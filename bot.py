@@ -217,17 +217,23 @@ async def handle_download(client: Client, callback: CallbackQuery):
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        # ✅ Delete the original button message immediately
+        # ✅ Answer callback immediately (removes loading animation on button)
+        try:
+            await callback.answer("📥 Starting download...")
+        except:
+            pass
+
+        # ✅ Delete the original button message right after answering
         try:
             if callback.message:
                 await callback.message.delete()
         except:
             pass
 
-        # ✅ Always create a dedicated progress message
+        # ✅ Send a dedicated progress message
         msg = await client.send_message(chat_id, "📥 Starting download...")
 
-        # ✅ Progress handler
+        # Progress handler
         async def progress(cur, total, stage):
             if not msg:
                 return
@@ -244,10 +250,9 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         pdf_path = await download_manga_as_pdf(code, dl_progress)
 
-        # ✅ Update to uploading stage
         await msg.edit("📤 Uploading PDF... 0%")
 
-        # ✅ Upload with progress
+        # Upload with progress
         async def upload_progress(cur, total):
             await progress(cur, total, "📤 Uploading")
 
@@ -267,7 +272,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 progress=upload_progress
             )
 
-        # ✅ Copy uploaded message to channel (no second upload)
+        # Copy uploaded message to channel
         try:
             await client.copy_message(
                 chat_id=-1002805198226,
@@ -282,16 +287,16 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 message_id=sent_msg.id
             )
 
-        # ✅ Delete progress message (button msg already deleted above)
+        # ✅ Delete progress message
         try:
             if msg:
                 await msg.delete()
         except:
             pass
 
-        # ✅ Final success popup (toast only, no lingering messages)
+        # Final success toast only
         try:
-            await callback.answer("✅ PDF uploaded & copied!")
+            await callback.answer("✅ PDF uploaded & copied!", show_alert=False)
         except:
             pass
 
