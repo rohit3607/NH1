@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-import aiohttp
+import aiohttp, aiofiles
 import json
 import cloudscraper
 import pyromod.listen
@@ -47,7 +47,7 @@ class Bot(Client):
             api_id=APP_ID,
             api_hash=API_HASH,
             bot_token=TG_BOT_TOKEN,
-            workers=4
+            workers=50
         )
         self.LOGGER = LOGGER
 
@@ -155,18 +155,28 @@ async def search_nhentai(query=None, page=1):
         )
     return results
 
-# ------------ PAGE DOWNLOADER -------------- #
+
+# =============== GENERATE THUMBNAIL ================= #
+async def generate_thumbnail(image_path, thumb_path):
+    img = Image.open(image_path)
+    img.thumbnail((320, 320))
+    img.save(thumb_path, "JPEG")
+    return thumb_path
+
+
+# =============== PAGE DOWNLOADER ================= #
 async def download_page(session, url, filename):
     headers = {"User-Agent": "Mozilla/5.0"}
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
             raise Exception(f"Failed to download: {url}")
-        with open(filename, "wb") as f:
-            f.write(await resp.read())
+        data = await resp.read()
+        async with aiofiles.open(filename, "wb") as f:
+            await f.write(data)
 
-# -------------- PDF GENERATOR -------------- #
+
+# =============== MANGA TO PDF ================= #
 async def download_manga_as_pdf(code, progress_callback=None):
-    # ✅ Use cloudscraper for API (bypasses Cloudflare)
     scraper = cloudscraper.create_scraper()
     api_url = f"https://nhentai.net/api/gallery/{code}"
     resp = scraper.get(api_url)
@@ -183,7 +193,6 @@ async def download_manga_as_pdf(code, progress_callback=None):
     media_id = data["media_id"]
     image_paths = []
 
-    headers = {"User-Agent": "Mozilla/5.0"}
     async with aiohttp.ClientSession() as session:
         for i, page in enumerate(data["images"]["pages"], start=1):
             ext = ext_map.get(page["t"], "jpg")
@@ -191,40 +200,49 @@ async def download_manga_as_pdf(code, progress_callback=None):
             path = os.path.join(folder, f"{i:03}.{ext}")
             await download_page(session, url, path)
             image_paths.append(path)
+
             if progress_callback:
                 await progress_callback(i, num_pages, "Downloading")
 
     # Generate PDF
     pdf_path = f"{folder}.pdf"
     first_img = Image.open(image_paths[0]).convert("RGB")
-    with open(pdf_path, "wb") as f:
-        first_img.save(f, format="PDF", save_all=True, append_images=[
-            Image.open(p).convert("RGB") for p in image_paths[1:]
-        ])
+    first_img.save(
+        pdf_path,
+        format="PDF",
+        save_all=True,
+        append_images=[Image.open(p).convert("RGB") for p in image_paths[1:]]
+    )
 
-    # Cleanup
+    # Thumbnail
+    thumb_path = f"{folder}_thumb.jpg"
+    await generate_thumbnail(image_paths[0], thumb_path)
+
+    # Cleanup images
     for img in image_paths:
         os.remove(img)
     os.rmdir(folder)
-    return pdf_path
 
-# ------------ CALLBACK HANDLER ------------- #
+    return pdf_path, thumb_path
 
-@app.on_callback_query(filters.regex(r"^download_(\d+)$"))
-async def handle_download(client: Client, callback_query: CallbackQuery):
-    code = callback_query.matches[0].group(1)
+
+# =============== CALLBACK HANDLER ================= #
+@Client.on_callback_query(filters.regex(r"^download_(\d+)$"))
+async def handle_download(client: Client, callback: CallbackQuery):
+    code = callback.matches[0].group(1)
     pdf_path = None
+    thumb_path = None
     msg = None
 
     try:
-        chat_id = callback_query.message.chat.id if callback_query.message else callback_query.from_user.id
+        chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        if callback_query.message:
-            msg = await callback_query.message.reply("📥 Starting download...")
+        if callback.message:
+            msg = await callback.message.reply("📥 Starting download...")
         else:
-            await callback_query.answer("📥 Starting download...")
+            await callback.answer("📥 Starting download...")
 
-        # ---------------- PROGRESS HANDLER ---------------- #
+        # Progress function
         async def progress(cur, total, stage="Downloading"):
             if total == 0:
                 return
@@ -236,42 +254,51 @@ async def handle_download(client: Client, callback_query: CallbackQuery):
             except:
                 pass
 
-        # ✅ Download manga PDF
-        pdf_path = await download_manga_as_pdf(code, progress)
-        
+        # Download manga as PDF
+        pdf_path, thumb_path = await download_manga_as_pdf(code, progress)
 
         if msg:
             await msg.edit("📤 Uploading PDF...")
 
-        # ---------------- SAFE UPLOAD WITH FLOODWAIT ---------------- #
-        async def safe_upload(chat_id, path, caption):
-            while True:
-                try:
-                    sent_msg = await client.send_document(
-                        chat_id,
-                        document=path,
-                        caption=caption,
-                        progress=lambda cur, total: asyncio.create_task(progress(cur, total, "Uploading"))
-                    )
-                    return sent_msg
-                except FloodWait as e:
-                    await asyncio.sleep(e.value)
-                except Exception as e:
-                    if msg:
-                        await msg.edit(f"❌ Upload Error: {e}")
-                    return None
-
-        # ✅ Upload to USER first
-        sent_msg = await safe_upload(chat_id, pdf_path, f"📖 Manga: {code}")
-
-        if sent_msg:
-            # ✅ Copy to channel instantly (no second upload)
-            await sent_msg.copy(
-                -1002805198226,
-                caption=f"📖 Manga: {code}"
+        # Upload to user
+        try:
+            await client.send_document(
+                chat_id,
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}",
+                progress=progress,
+                progress_args=("Uploading",)
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await client.send_document(
+                chat_id,
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}",
+                progress=progress,
+                progress_args=("Uploading",)
             )
 
-        # ✅ Delete progress message after both done
+        # Upload to channel
+        try:
+            await client.send_document(
+                -1002805198226,
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}",
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await client.send_document(
+                -1002805198226,
+                document=pdf_path,
+                thumb=thumb_path,
+                caption=f"📖 Manga: {code}",
+            )
+
+        # ✅ Delete progress message
         if msg:
             await msg.delete()
 
@@ -281,12 +308,14 @@ async def handle_download(client: Client, callback_query: CallbackQuery):
             if msg:
                 await msg.edit(err)
             else:
-                await callback_query.edit_message_text(err)
+                await callback.edit_message_text(err)
         except:
             pass
     finally:
         if pdf_path and os.path.exists(pdf_path):
             os.remove(pdf_path)
+        if thumb_path and os.path.exists(thumb_path):
+            os.remove(thumb_path)
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
