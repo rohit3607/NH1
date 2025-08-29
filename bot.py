@@ -122,7 +122,7 @@ async def search_nhentai(query=None, page=1):
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
     else:
-        url = f"https://nhentai.net/?page={page}"
+        url = f"https://nhentai.net/language/english/?page={page}"
 
     html = scraper.get(url).text
     soup = BeautifulSoup(html, "html.parser")
@@ -146,7 +146,7 @@ async def search_nhentai(query=None, page=1):
                 thumb_url=thumb,
                 input_message_content=InputTextMessageContent(
                     message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                    disable_web_page_preview=False
+                    disable_web_page_preview=True
                 ),
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
