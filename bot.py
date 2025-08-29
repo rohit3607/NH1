@@ -165,173 +165,100 @@ async def download_page(session, url, filename):
             f.write(await resp.read())
 
 # -------------- PDF GENERATOR -------------- #
+async def download_manga_as_pdf(code, progress_callback=None):
+    # ✅ Use cloudscraper for API (bypasses Cloudflare)
+    scraper = cloudscraper.create_scraper()
+    api_url = f"https://nhentai.net/api/gallery/{code}"
+    resp = scraper.get(api_url)
 
-async def download_manga_as_pdf(code: str, progress_callback=None):
-    pdf_path = f"{code}.pdf"
-    thumb_path = f"{code}_thumb.jpg"
+    if resp.status_code != 200:
+        raise Exception("Gallery not found.")
+    data = resp.json()
 
-    try:
-        if progress_callback:
-            await progress_callback(0, 100, "🔍 Fetching pages")
+    folder = f"nhentai_{code}"
+    os.makedirs(folder, exist_ok=True)
 
-        # ✅ Get gallery info
-        url = f"https://nhentai.net/g/{code}/"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code != 200:
-            raise Exception(f"Failed to fetch gallery page: {r.status_code}")
+    num_pages = len(data["images"]["pages"])
+    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
+    media_id = data["media_id"]
+    image_paths = []
 
-        soup = BeautifulSoup(r.text, "html.parser")
-        img_tags = soup.select("#thumbnail-container img")
-
-        if not img_tags:
-            raise Exception("No pages found for this code!")
-
-        img_urls = []
-        for img in img_tags:
-            src = img.get("data-src") or img.get("src")
-            if src.startswith("//"):
-                src = "https:" + src
-            img_urls.append(src.replace("t.nhentai.net", "i.nhentai.net").replace("t.jpg", ".jpg"))
-
-        total = len(img_urls)
-
-        # ✅ Build PDF
-        doc = fitz.open()
-        for i, img_url in enumerate(img_urls, 1):
-            r = requests.get(img_url, headers={"User-Agent": "Mozilla/5.0"})
-            img = Image.open(BytesIO(r.content)).convert("RGB")
-
-            rect = fitz.Rect(0, 0, img.width, img.height)
-            page = doc.new_page(width=img.width, height=img.height)
-            pix = fitz.Pixmap(fitz.csRGB, img.width, img.height, img.tobytes())
-            page.insert_image(rect, stream=r.content)
-
-            if i == 1:  # save first page as thumb
-                img.save(thumb_path, "JPEG")
-
+    headers = {"User-Agent": "Mozilla/5.0"}
+    async with aiohttp.ClientSession() as session:
+        for i, page in enumerate(data["images"]["pages"], start=1):
+            ext = ext_map.get(page["t"], "jpg")
+            url = f"https://i.nhentai.net/galleries/{media_id}/{i}.{ext}"
+            path = os.path.join(folder, f"{i:03}.{ext}")
+            await download_page(session, url, path)
+            image_paths.append(path)
             if progress_callback:
-                await progress_callback(i, total, "📖 Downloading")
+                await progress_callback(i, num_pages, "Downloading")
 
-        doc.save(pdf_path)
-        doc.close()
+    # Generate PDF
+    pdf_path = f"{folder}.pdf"
+    first_img = Image.open(image_paths[0]).convert("RGB")
+    with open(pdf_path, "wb") as f:
+        first_img.save(f, format="PDF", save_all=True, append_images=[
+            Image.open(p).convert("RGB") for p in image_paths[1:]
+        ])
 
-        return pdf_path, thumb_path
-
-    except Exception as e:
-        raise Exception(f"Download failed: {e}")
+    # Cleanup
+    for img in image_paths:
+        os.remove(img)
+    os.rmdir(folder)
+    return pdf_path
 
 # ------------ CALLBACK HANDLER ------------- #
-
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-
-    # ⚡ Always answer callback (important!)
-    try:
-        await callback.answer("⏳ Fetching manga...", show_alert=False)
-    except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await callback.answer("⏳ Fetching manga...", show_alert=False)
-
-    pdf_path = thumb_path = None
+    pdf_path = None
     msg = None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        try:
+        if callback.message:
             msg = await callback.message.reply("📥 Starting download...")
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            msg = await callback.message.reply("📥 Starting download...")
+        else:
+            await callback.answer("📥 Starting download...")
 
-        # Progress callback
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
-                await msg.edit(txt)
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await msg.edit(txt)
+                if msg:
+                    await msg.edit(txt)
+                else:
+                    await callback.edit_message_text(txt)
             except:
                 pass
 
-        # ✅ Download PDF
-        pdf_path, thumb_path = await download_manga_as_pdf(code, progress)
+        pdf_path = await download_manga_as_pdf(code, progress)
 
-        try:
+        if msg:
             await msg.edit("📤 Uploading PDF...")
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await msg.edit("📤 Uploading PDF...")
+        else:
+            await callback.edit_message_text("📤 Uploading PDF...")
 
-        # Upload progress callback
-        async def upload_progress(cur, total):
-            percent = int((cur / total) * 100)
-            try:
-                await msg.edit(f"📤 Uploading... {percent}%")
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await msg.edit(f"📤 Uploading... {percent}%")
-            except:
-                pass
+        # ✅ Send to user
+        await client.send_document(chat_id, document=pdf_path, caption=f"📖 Manga: {code}")
 
-        # ✅ Upload to user
-        try:
-            await client.send_document(
-                chat_id,
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}",
-                progress=upload_progress
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.send_document(
-                chat_id,
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}",
-                progress=upload_progress
-            )
-
-        # ✅ Upload to your log/channel
-        try:
-            await client.send_document(
-                -1002805198226,  # your log channel
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}"
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.send_document(
-                -1002805198226,
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}"
-            )
-
-        try:
-            await msg.edit("✅ Done!")
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await msg.edit("✅ Done!")
+        # ✅ Copy to channel
+        await client.send_document(-1002805198226, document=pdf_path, caption=f"📖 Manga: {code}")
 
     except Exception as e:
+        err = f"❌ Error: {e}"
         try:
-            await msg.edit(f"❌ Error: {e}")
-        except FloodWait as e2:
-            await asyncio.sleep(e2.value)
-            await msg.edit(f"❌ Error: {e}")
+            if msg:
+                await msg.edit(err)
+            else:
+                await callback.edit_message_text(err)
         except:
             pass
     finally:
         if pdf_path and os.path.exists(pdf_path):
             os.remove(pdf_path)
-        if thumb_path and os.path.exists(thumb_path):
-            os.remove(thumb_path)
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
