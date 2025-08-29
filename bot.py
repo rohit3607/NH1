@@ -275,15 +275,16 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 message_id=sent_msg.id
             )
 
-        # ✅ Delete progress message
+        # ✅ Delete progress + original button message
         try:
-            await msg.delete()
+            if msg:
+                await msg.delete()
             if callback.message:
                 await callback.message.delete()
         except:
             pass
 
-        # ✅ Final success popup
+        # ✅ Final success popup (toast only)
         try:
             await callback.answer("✅ PDF uploaded & copied!")
         except:
