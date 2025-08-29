@@ -13,6 +13,7 @@ python-dotenv
 # --- For-Web-Response ------- #
 pytz
 requests
+tqdm
 bs4
 pillow
 aiofiles
