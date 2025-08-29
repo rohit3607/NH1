@@ -164,55 +164,25 @@ async def download_page(session, url, filename):
         with open(filename, "wb") as f:
             f.write(await resp.read())
 
-# -------------- PDF GENERATOR -------------- #
-async def download_manga_as_pdf(code, progress_callback=None):
-    # ✅ Use cloudscraper for API (bypasses Cloudflare)
-    scraper = cloudscraper.create_scraper()
-    api_url = f"https://nhentai.net/api/gallery/{code}"
-    resp = scraper.get(api_url)
+# ---------------- THUMBNAIL MAKER ---------------- #
+def generate_thumbnail(image_path: str, code: str) -> str:
+    """Generate a JPG thumbnail from the first page image."""
+    thumb_path = f"{code}_thumb.jpg"
+    try:
+        img = Image.open(image_path).convert("RGB")
+        img.thumbnail((320, 320))  # small optimized thumbnail
+        img.save(thumb_path, "JPEG")
+    except Exception as e:
+        print(f"[Thumbnail Error] {e}")
+        return None
+    return thumb_path
 
-    if resp.status_code != 200:
-        raise Exception("Gallery not found.")
-    data = resp.json()
-
-    folder = f"nhentai_{code}"
-    os.makedirs(folder, exist_ok=True)
-
-    num_pages = len(data["images"]["pages"])
-    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-    media_id = data["media_id"]
-    image_paths = []
-
-    headers = {"User-Agent": "Mozilla/5.0"}
-    async with aiohttp.ClientSession() as session:
-        for i, page in enumerate(data["images"]["pages"], start=1):
-            ext = ext_map.get(page["t"], "jpg")
-            url = f"https://i.nhentai.net/galleries/{media_id}/{i}.{ext}"
-            path = os.path.join(folder, f"{i:03}.{ext}")
-            await download_page(session, url, path)
-            image_paths.append(path)
-            if progress_callback:
-                await progress_callback(i, num_pages, "Downloading")
-
-    # Generate PDF
-    pdf_path = f"{folder}.pdf"
-    first_img = Image.open(image_paths[0]).convert("RGB")
-    with open(pdf_path, "wb") as f:
-        first_img.save(f, format="PDF", save_all=True, append_images=[
-            Image.open(p).convert("RGB") for p in image_paths[1:]
-        ])
-
-    # Cleanup
-    for img in image_paths:
-        os.remove(img)
-    os.rmdir(folder)
-    return pdf_path
 
 # ------------ CALLBACK HANDLER ------------- #
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-    pdf_path = None
+    pdf_path, thumb_path = None, None
     msg = None
 
     try:
@@ -229,23 +199,42 @@ async def handle_download(client: Client, callback: CallbackQuery):
             try:
                 if msg:
                     await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
             except:
                 pass
 
-        pdf_path = await download_manga_as_pdf(code, progress)
+        # ✅ Download manga as PDF
+        pdf_path, first_img_path = await download_manga_as_pdf(code, progress)
+
+        # ✅ Generate thumbnail
+        thumb_path = generate_thumbnail(first_img_path, code)
 
         if msg:
             await msg.edit("📤 Uploading PDF...")
-        else:
-            await callback.edit_message_text("📤 Uploading PDF...")
+
+        # ------------ Upload Function with FloodWait ------------ #
+        async def safe_send(chat_id, path, caption, thumb):
+            while True:
+                try:
+                    await client.send_document(
+                        chat_id,
+                        document=path,
+                        caption=caption,
+                        thumb=thumb,
+                        progress=progress,
+                        progress_args=(0, 100, "Uploading")
+                    )
+                    break
+                except FloodWait as e:
+                    await asyncio.sleep(e.value)
+                except Exception as e:
+                    print(f"Upload Error: {e}")
+                    break
 
         # ✅ Send to user
-        await client.send_document(chat_id, document=pdf_path, caption=f"📖 Manga: {code}")
+        await safe_send(chat_id, pdf_path, f"📖 Manga: {code}", thumb_path)
 
         # ✅ Copy to channel
-        await client.send_document(-1002805198226, document=pdf_path, caption=f"📖 Manga: {code}")
+        await safe_send(-1002805198226, pdf_path, f"📖 Manga: {code}", thumb_path)
 
     except Exception as e:
         err = f"❌ Error: {e}"
@@ -257,8 +246,65 @@ async def handle_download(client: Client, callback: CallbackQuery):
         except:
             pass
     finally:
+        # Cleanup
         if pdf_path and os.path.exists(pdf_path):
             os.remove(pdf_path)
+        if thumb_path and os.path.exists(thumb_path):
+            os.remove(thumb_path)
+
+
+# -------------- PDF GENERATOR -------------- #
+async def download_manga_as_pdf(code, progress_callback=None):
+    scraper = cloudscraper.create_scraper()
+    api_url = f"https://nhentai.net/api/gallery/{code}"
+    resp = scraper.get(api_url)
+
+    if resp.status_code != 200:
+        raise Exception("Gallery not found.")
+    data = resp.json()
+
+    folder = f"nhentai_{code}"
+    os.makedirs(folder, exist_ok=True)
+
+    num_pages = len(data["images"]["pages"])
+    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
+    media_id = data["media_id"]
+    image_paths = []
+    first_img_path = None
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    async with aiohttp.ClientSession() as session:
+        for i, page in enumerate(data["images"]["pages"], start=1):
+            ext = ext_map.get(page["t"], "jpg")
+            url = f"https://i.nhentai.net/galleries/{media_id}/{i}.{ext}"
+            path = os.path.join(folder, f"{i:03}.{ext}")
+            await download_page(session, url, path)
+            image_paths.append(path)
+
+            if i == 1:  # Save first page for thumbnail
+                first_img_path = path
+
+            if progress_callback:
+                await progress_callback(i, num_pages, "Downloading")
+
+    # Generate PDF
+    pdf_path = f"{folder}.pdf"
+    first_img = Image.open(image_paths[0]).convert("RGB")
+    with open(pdf_path, "wb") as f:
+        first_img.save(f, format="PDF", save_all=True, append_images=[
+            Image.open(p).convert("RGB") for p in image_paths[1:]
+        ])
+
+    # Cleanup images (keep first image for thumbnail)
+    for img in image_paths[1:]:
+        os.remove(img)
+    if os.path.exists(folder):
+        try:
+            os.rmdir(folder)
+        except:
+            pass
+
+    return pdf_path, first_img_path
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
