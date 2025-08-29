@@ -125,7 +125,10 @@ async def search_nhentai(query=None, page=1):
             html = await response.text()
 
     soup = BeautifulSoup(html, "html.parser")
-    gallery_items = soup.select(".gallery")
+
+    # Works for both homepage & search results
+    gallery_items = soup.select(".gallery") or soup.select(".gallery-favorite") or soup.select(".gallery-favorite-container")
+
     for item in gallery_items[:10]:
         link = item.select_one("a")["href"]
         code = link.split("/")[2]
