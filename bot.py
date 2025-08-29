@@ -218,9 +218,9 @@ async def handle_download(client: Client, callback: CallbackQuery):
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
         if callback.message:
-            msg = await callback.message.reply("📥 Starting download...")
+            msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
         else:
-            await callback.answer("📥 Starting download...")
+            await callback.answer("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
@@ -235,27 +235,18 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         # Download PDF
         async def dl_progress(cur, total):
-            await progress(cur, total, "📥 Downloading")
+            await progress(cur, total, "📥 Dᴏᴡɴʟᴏᴀᴅɪɴɢ")
 
         pdf_path = await download_manga_as_pdf(code, dl_progress)
 
         if msg:
-            await msg.edit("📤 Uploading PDF... 0%")
+            await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
         else:
-            await callback.edit_message_text("📤 Uploading PDF... 0%")
+            await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
 
-        # Upload with progress (skip 100%)
+        # Upload with progress
         async def upload_progress(cur, total):
-            percent = int((cur / total) * 100)
-            if percent < 100:  # ❌ no update at 100%
-                txt = f"📤 Uploading... {percent}%"
-                try:
-                    if msg:
-                        await msg.edit(txt)
-                    else:
-                        await callback.edit_message_text(txt)
-                except:
-                    pass
+            await progress(cur, total, "📤 Uᴘʟᴏᴀᴅɪɴɢ")
 
         try:
             sent_msg = await client.send_document(
@@ -272,15 +263,6 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 caption=f"📖 Manga: {code}",
                 progress=upload_progress
             )
-
-        # ✅ Delete progress message after upload is complete
-        try:
-            if msg:
-                await msg.delete()
-            elif callback.message:
-                await callback.message.delete()
-        except:
-            pass
 
         # Copy uploaded message to channel (no second upload)
         try:
@@ -296,6 +278,14 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 from_chat_id=chat_id,
                 message_id=sent_msg.id
             )
+
+        if msg:
+            await msg.delete()
+        elif callback.message:
+            try:
+                await callback.message.delete()
+            except:
+                pass
 
     except Exception as e:
         err = f"❌ Error: {e}"
@@ -323,7 +313,7 @@ async def update_bot(client, message):
             return
 
         await asyncio.sleep(2)
-        await msg.edit("♻️ Restarting bot...")
+        await msg.edit("♻️ Rᴇsᴛᴀʀᴛɪɴɢ ʙᴏᴛ...")
 
         # ✅ Delete after 5s
         await asyncio.sleep(5)
