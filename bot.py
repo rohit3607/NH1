@@ -103,7 +103,7 @@ async def start_command(_, message: Message):
         reply_markup=keyboard
     )
 
-# ---------------- INLINE SEARCH ---------------- #
+# -------------- INLINE SEARCH -------------- #
 @app.on_inline_query()
 async def inline_search(client: Client, inline_query):
     query = inline_query.query.strip()
@@ -113,10 +113,15 @@ async def inline_search(client: Client, inline_query):
     next_offset = str(page + 1) if len(results) == 10 else ""
     await inline_query.answer(results, cache_time=1, is_personal=True, next_offset=next_offset)
 
-# ---------------- INLINE SEARCH ---------------- #
+# -------------- INLINE SEARCH -------------- #
 async def search_nhentai(query=None, page=1):
     results = []
-    url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}" if query else f"https://nhentai.net/?page={page}"
+
+    # ✅ If no query, use empty search (homepage feed)
+    if query:
+        url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
+    else:
+        url = f"https://nhentai.net/search/?q=&page={page}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -125,9 +130,7 @@ async def search_nhentai(query=None, page=1):
             html = await response.text()
 
     soup = BeautifulSoup(html, "html.parser")
-
-    # Works for both homepage & search results
-    gallery_items = soup.select(".gallery") or soup.select(".gallery-favorite") or soup.select(".gallery-favorite-container")
+    gallery_items = soup.select(".gallery")
 
     for item in gallery_items[:10]:
         link = item.select_one("a")["href"]
@@ -144,7 +147,7 @@ async def search_nhentai(query=None, page=1):
                 thumb_url=thumb,
                 input_message_content=InputTextMessageContent(
                     message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                    disable_web_page_preview=False
+                    disable_web_page_preview=True
                 ),
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
@@ -153,7 +156,7 @@ async def search_nhentai(query=None, page=1):
         )
     return results
 
-# ---------------- PAGE DOWNLOADER ---------------- #
+# ------------ PAGE DOWNLOADER -------------- #
 async def download_page(session, url, filename):
     headers = {"User-Agent": "Mozilla/5.0"}
     async with session.get(url, headers=headers) as resp:
@@ -162,7 +165,7 @@ async def download_page(session, url, filename):
         with open(filename, "wb") as f:
             f.write(await resp.read())
 
-# ---------------- PDF GENERATOR ---------------- #
+# -------------- PDF GENERATOR -------------- #
 async def download_manga_as_pdf(code, progress_callback=None):
     # ✅ Use cloudscraper for API (bypasses Cloudflare)
     scraper = cloudscraper.create_scraper()
@@ -206,7 +209,7 @@ async def download_manga_as_pdf(code, progress_callback=None):
     os.rmdir(folder)
     return pdf_path
 
-# ---------------- CALLBACK HANDLER ---------------- #
+# ------------ CALLBACK HANDLER ------------- #
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
