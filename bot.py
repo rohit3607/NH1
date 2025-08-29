@@ -122,7 +122,7 @@ async def search_nhentai(query=None, page=1):
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
     else:
-        url = f"https://nhentai.net/?page={page}"
+        url = f"https://nhentai.net/language/english/?page={page}"
 
     html = scraper.get(url).text
     soup = BeautifulSoup(html, "html.parser")
