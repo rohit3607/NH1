@@ -284,7 +284,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
         ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
         ext = ext_map.get(first_page["t"], "jpg")
         first_page_url = f"https://i.nhentai.net/galleries/{media_id}/1.{ext}"
-        thumb_path = f"thumb_{code}.{ext}"
+        thumb_path = f"thumb_{code}.jpg"
 
         async with aiohttp.ClientSession() as session:
             async with session.get(first_page_url) as resp:
