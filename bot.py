@@ -244,8 +244,8 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         if msg:
             await msg.edit("📤 Uploading PDF... 0%")
-        else:
-            await callback.edit_message_text("📤 Uploading PDF... 0%")
+        #else:
+            #await callback.edit_message_text("📤 Uploading PDF... 0%")
 
         # ✅ Upload with progress
         async def upload_progress(cur, total):
