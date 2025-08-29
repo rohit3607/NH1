@@ -238,7 +238,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
         async def dl_progress(cur, total):
             await progress(cur, total, "📥 Downloading")
 
-        pdf_path = await download_manga_as_pdf(code, progress)
+        pdf_path = await download_manga_as_pdf(code, dl_progress)
 
 
         if msg:
