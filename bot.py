@@ -212,24 +212,19 @@ async def download_manga_as_pdf(code, progress_callback=None):
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-    pdf_path, msg, sent_msg = None, None, None
+    pdf_path, progress_msg, sent_msg = None, None, None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        if callback.message:
-            msg = await callback.message.reply("📥 Starting download...")
-        else:
-            await callback.answer("📥 Starting download...")
+        # Always create a dedicated progress message
+        progress_msg = await client.send_message(chat_id, "📥 Starting download...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
-                if msg:
-                    await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
+                await progress_msg.edit_text(txt)
             except:
                 pass
 
@@ -239,10 +234,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         pdf_path = await download_manga_as_pdf(code, dl_progress)
 
-        if msg:
-            await msg.edit("📤 Uploading PDF... 0%")
-        else:
-            await callback.edit_message_text("📤 Uploading PDF... 0%")
+        await progress_msg.edit_text("📤 Uploading PDF... 0%")
 
         # Upload with progress
         async def upload_progress(cur, total):
@@ -279,20 +271,17 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 message_id=sent_msg.id
             )
 
-        # ✅ Delete progress message after upload is done
-        if msg:
-            await msg.delete()
-        elif callback.message:
-            try:
-                await callback.message.delete()
-            except:
-                pass
+        # ✅ Delete progress message after upload finishes
+        try:
+            await progress_msg.delete()
+        except:
+            pass
 
     except Exception as e:
         err = f"❌ Error: {e}"
         try:
-            if msg:
-                await msg.edit(err)
+            if progress_msg:
+                await progress_msg.edit_text(err)
             else:
                 await callback.edit_message_text(err)
         except:
