@@ -217,6 +217,13 @@ async def handle_download(client: Client, callback: CallbackQuery):
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
+        # ✅ Delete the original button message immediately
+        try:
+            if callback.message:
+                await callback.message.delete()
+        except:
+            pass
+
         # ✅ Always create a dedicated progress message
         msg = await client.send_message(chat_id, "📥 Starting download...")
 
@@ -275,16 +282,14 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 message_id=sent_msg.id
             )
 
-        # ✅ Delete progress + original button message
+        # ✅ Delete progress message (button msg already deleted above)
         try:
             if msg:
                 await msg.delete()
-            if callback.message:
-                await callback.message.delete()
         except:
             pass
 
-        # ✅ Final success popup (toast only)
+        # ✅ Final success popup (toast only, no lingering messages)
         try:
             await callback.answer("✅ PDF uploaded & copied!")
         except:
@@ -295,8 +300,6 @@ async def handle_download(client: Client, callback: CallbackQuery):
         try:
             if msg:
                 await msg.edit(err)
-            elif callback.message:
-                await callback.message.edit_text(err)
         except:
             pass
     finally:
