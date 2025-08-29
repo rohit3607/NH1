@@ -113,68 +113,41 @@ async def inline_search(client: Client, inline_query):
     next_offset = str(page + 1) if len(results) == 10 else ""
     await inline_query.answer(results, cache_time=1, is_personal=True, next_offset=next_offset)
 
+# ---------------- INLINE SEARCH ---------------- #
 async def search_nhentai(query=None, page=1):
     results = []
-    if query:
-        url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    return []
-                html = await response.text()
+    url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}" if query else f"https://nhentai.net/?page={page}"
 
-        soup = BeautifulSoup(html, "html.parser")
-        gallery_items = soup.select(".gallery")
-        for item in gallery_items[:10]:
-            link = item.select_one("a")["href"]
-            code = link.split("/")[2]
-            title = item.select_one(".caption").text.strip() if item.select_one(".caption") else f"Code {code}"
-            thumb = item.select_one("img").get("data-src") or item.select_one("img").get("src")
-            if thumb.startswith("//"):
-                thumb = "https:" + thumb
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status != 200:
+                return []
+            html = await response.text()
 
-            results.append(
-                InlineQueryResultArticle(
-                    title=title,
-                    description=f"Code: {code}",
-                    thumb_url=thumb,
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                        disable_web_page_preview=False
-                    ),
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
-                    ])
-                )
+    soup = BeautifulSoup(html, "html.parser")
+    gallery_items = soup.select(".gallery")
+    for item in gallery_items[:10]:
+        link = item.select_one("a")["href"]
+        code = link.split("/")[2]
+        title = item.select_one(".caption").text.strip() if item.select_one(".caption") else f"Code {code}"
+        thumb = item.select_one("img").get("data-src") or item.select_one("img").get("src")
+        if thumb.startswith("//"):
+            thumb = "https:" + thumb
+
+        results.append(
+            InlineQueryResultArticle(
+                title=title,
+                description=f"Code: {code}",
+                thumb_url=thumb,
+                input_message_content=InputTextMessageContent(
+                    message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
+                    disable_web_page_preview=False
+                ),
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
+                ])
             )
-    else:
-        # ✅ Use API for latest
-        api_url = f"https://nhentai.net/?page={page}"
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url) as response:
-                if response.status != 200:
-                    return []
-                data = await response.json()
-
-        for g in data.get("result", [])[:10]:
-            code = g["id"]
-            title = g["title"]["english"] or g["title"]["japanese"] or f"Code {code}"
-            thumb = f"https://t.nhentai.net/galleries/{g['media_id']}/cover.jpg"
-
-            results.append(
-                InlineQueryResultArticle(
-                    title=title,
-                    description=f"Code: {code}",
-                    thumb_url=thumb,
-                    input_message_content=InputTextMessageContent(
-                        message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                        disable_web_page_preview=False
-                    ),
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
-                    ])
-                )
-            )
+        )
     return results
 
 # ---------------- PAGE DOWNLOADER ---------------- #
@@ -263,7 +236,11 @@ async def handle_download(client: Client, callback: CallbackQuery):
         else:
             await callback.edit_message_text("📤 Uploading PDF...")
 
+        # ✅ Send to user
         await client.send_document(chat_id, document=pdf_path, caption=f"📖 Manga: {code}")
+
+        # ✅ Copy to channel
+        await client.send_document(-1002805198226, document=pdf_path, caption=f"📖 Manga: {code}")
 
     except Exception as e:
         err = f"❌ Error: {e}"
