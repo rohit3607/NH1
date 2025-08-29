@@ -209,19 +209,20 @@ async def download_manga_as_pdf(code, progress_callback=None):
     return pdf_path
 
 # ------------ CALLBACK HANDLER ------------- #
+
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
-async def handle_download(client: Client, callback: CallbackQuery):
-    code = callback.matches[0].group(1)
+async def handle_download(client: Client, callback_query: CallbackQuery):
+    code = callback_query.matches[0].group(1)
     pdf_path = None
     msg = None
 
     try:
-        chat_id = callback.message.chat.id if callback.message else callback.from_user.id
+        chat_id = callback_query.message.chat.id if callback_query.message else callback_query.from_user.id
 
-        if callback.message:
-            msg = await callback.message.reply("📥 Starting download...")
+        if callback_query.message:
+            msg = await callback_query.message.reply("📥 Starting download...")
         else:
-            await callback.answer("📥 Starting download...")
+            await callback_query.answer("📥 Starting download...")
 
         # ---------------- PROGRESS HANDLER ---------------- #
         async def progress(cur, total, stage="Downloading"):
@@ -282,7 +283,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
             if msg:
                 await msg.edit(err)
             else:
-                await callback.edit_message_text(err)
+                await callback_query.edit_message_text(err)
         except:
             pass
     finally:
