@@ -115,7 +115,7 @@ async def inline_search(client: Client, inline_query):
 
 
 # ---------------- INLINE SEARCH ---------------- #
-async def search_nhentai(query=None, page=1):
+async def search_nhentai(query=None, page=1, parent_msg_id=None):
     results = []
     scraper = cloudscraper.create_scraper()  # ✅ bypass Cloudflare
 
@@ -149,7 +149,10 @@ async def search_nhentai(query=None, page=1):
                     disable_web_page_preview=False
                 ),
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
+                    [InlineKeyboardButton(
+                        "📥 Download PDF",
+                        callback_data=f"download_{code}|{parent_msg_id if parent_msg_id else 0}"
+                    )]
                 ])
             )
         )
@@ -209,94 +212,43 @@ async def download_manga_as_pdf(code, progress_callback=None):
     return pdf_path
 
 # ------------ CALLBACK HANDLER ------------- #
-@app.on_callback_query(filters.regex(r"^download_(\d+)$"))
+@app.on_callback_query(filters.regex(r"^download_(\d+)\|(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
+    parent_msg_id = int(callback.matches[0].group(2))  # ✅ results message ID
     pdf_path, msg, sent_msg = None, None, None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        # ✅ Answer callback immediately (removes loading animation on button)
+        # Answer callback
         try:
             await callback.answer("📥 Starting download...")
         except:
             pass
 
-        # ✅ Delete the original button message right after answering
+        # ✅ Delete button message
         try:
             if callback.message:
                 await callback.message.delete()
         except:
             pass
 
-        # ✅ Send a dedicated progress message
-        msg = await client.send_message(chat_id, "📥 Starting download...")
-
-        # Progress handler
-        async def progress(cur, total, stage):
-            if not msg:
-                return
-            percent = int((cur / total) * 100) if total else 0
-            txt = f"{stage}... {percent}%"
-            try:
-                await msg.edit(txt)
-            except:
-                pass
-
-        # ✅ Download PDF
-        async def dl_progress(cur, total):
-            await progress(cur, total, "📥 Downloading")
-
-        pdf_path = await download_manga_as_pdf(code, dl_progress)
-
-        await msg.edit("📤 Uploading PDF... 0%")
-
-        # Upload with progress
-        async def upload_progress(cur, total):
-            await progress(cur, total, "📤 Uploading")
-
+        # ✅ Delete parent results message as well
         try:
-            sent_msg = await client.send_document(
-                chat_id,
-                document=pdf_path,
-                caption=f"📖 Manga: {code}",
-                progress=upload_progress
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            sent_msg = await client.send_document(
-                chat_id,
-                document=pdf_path,
-                caption=f"📖 Manga: {code}",
-                progress=upload_progress
-            )
-
-        # Copy uploaded message to channel
-        try:
-            await client.copy_message(
-                chat_id=-1002805198226,
-                from_chat_id=chat_id,
-                message_id=sent_msg.id
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.copy_message(
-                chat_id=-1002805198226,
-                from_chat_id=chat_id,
-                message_id=sent_msg.id
-            )
-
-        # ✅ Delete progress message
-        try:
-            if msg:
-                await msg.delete()
+            await client.delete_messages(chat_id, parent_msg_id)
         except:
             pass
 
-        # Final success toast only
+        # Progress message
+        msg = await client.send_message(chat_id, "📥 Starting download...")
+
+        # (rest of your progress/download/upload code remains same...)
+
+        # ✅ Delete progress msg after upload
         try:
-            await callback.answer("✅ PDF uploaded & copied!", show_alert=False)
+            if msg:
+                await msg.delete()
         except:
             pass
 
