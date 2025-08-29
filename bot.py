@@ -314,9 +314,19 @@ async def update_bot(client, message):
         else:
             await msg.edit(f"❌ Git error:\n<pre>{pull.stderr}</pre>")
             return
+
         await asyncio.sleep(2)
         await msg.edit("♻️ Restarting bot...")
+
+        # ✅ Delete after 5s
+        await asyncio.sleep(5)
+        try:
+            await msg.delete()
+        except:
+            pass
+
         os.execl(sys.executable, sys.executable, *sys.argv)
+
     except Exception as e:
         await msg.edit(f"⚠️ Error: {e}")
 
