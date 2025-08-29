@@ -224,17 +224,21 @@ async def handle_download(client: Client, callback: CallbackQuery):
             await callback.answer("📥 Starting download...")
 
         # ---------------- PROGRESS HANDLER ---------------- #
-        async def progress(cur, total, stage="Downloading"):
+        def progress(cur, total, stage="Downloading"):
             percent = int((cur / total) * 100) if total else 0
             txt = f"{stage}... {percent}%"
-            try:
-                if msg:
-                    await msg.edit(txt)
-            except:
-                pass
+
+            async def edit_message():
+                try:
+                    if msg:
+                        await msg.edit(txt)
+                except:
+                    pass
+
+            client.loop.create_task(edit_message())
 
         # ✅ Download manga PDF
-        pdf_path = await download_manga_as_pdf(code, progress)
+        pdf_path = await download_manga_as_pdf(code, lambda c, t, s="Downloading": progress(c, t, s))
 
         if msg:
             await msg.edit("📤 Uploading PDF...")
@@ -252,7 +256,6 @@ async def handle_download(client: Client, callback: CallbackQuery):
                     )
                     break
                 except FloodWait as e:
-                    # ⏳ Retry after FloodWait
                     await asyncio.sleep(e.value)
                 except Exception as e:
                     if msg:
@@ -264,6 +267,10 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         # ✅ Copy to channel
         await safe_upload(-1002805198226, pdf_path, f"📖 Manga: {code}")
+
+        # ✅ Delete progress message after success
+        if msg:
+            await msg.delete()
 
     except Exception as e:
         err = f"❌ Error: {e}"
