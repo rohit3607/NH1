@@ -284,6 +284,11 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         if msg:
             await msg.delete()
+        elif callback.message:
+            try:
+                await callback.message.delete()
+            except:
+                pass
         #else:
             #await callback.edit_message_text("✅ Done! PDF uploaded & copied.")
 
