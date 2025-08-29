@@ -27,6 +27,8 @@ START_PIC = os.environ.get("START_PIC", "https://telegra.ph/file/ec17880d61180d3
 START_MSG = os.environ.get("START_MESSAGE", "<b>ʜᴇʟʟᴏ {mention}\n\n<blockquote> ɪ ᴀᴍ ʜ-ᴍᴀɴɢᴀ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ.</blockquote></b>")
 
 #--------------------------------------------
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1002805198226")) # STORE EVERY DOWNLOAD FILE
+
 #--------------------------------------------
 
 LOG_FILE_NAME = "postgenbot.txt"
