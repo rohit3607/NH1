@@ -254,7 +254,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
         if callback.message:
             msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
         else:
-            await callback.answer("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
+            await callback.answer("📥 ᴅᴏᴡɴʟᴏᴀᴅ...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
@@ -303,7 +303,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
         if msg:
             await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
         else:
-            await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
+            await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅ... 0%")
 
         # --- Upload PDF with thumbnail ---
         async def upload_progress(cur, total):
