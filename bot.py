@@ -47,7 +47,7 @@ class Bot(Client):
             api_id=APP_ID,
             api_hash=API_HASH,
             bot_token=TG_BOT_TOKEN,
-            workers=4
+            workers=TG_BOT_WORKERS
         )
         self.LOGGER = LOGGER
 
