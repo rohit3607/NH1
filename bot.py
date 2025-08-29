@@ -24,8 +24,8 @@ from pyrogram.types import (
 )
 
 # ---------------- CONFIG ---------------- #
-from config import *  # Define APP_ID, API_HASH, TG_BOT_TOKEN, OWNER_ID, PORT, LOGGER, START_MSG, START_PIC
-from database import *  # Your database file
+from config import *  
+from database import * 
 
 # ---------------- WEB SERVER ---------------- #
 routes = web.RouteTableDef()
@@ -117,7 +117,7 @@ async def inline_search(client: Client, inline_query):
 # -------------- INLINE SEARCH -------------- #
 async def search_nhentai(query=None, page=1):
     results = []
-    scraper = cloudscraper.create_scraper()  # ✅ bypass Cloudflare
+    scraper = cloudscraper.create_scraper()
 
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
@@ -167,7 +167,6 @@ async def download_page(session, url, filename):
 
 # -------------- PDF GENERATOR -------------- #
 async def download_manga_as_pdf(code, progress_callback=None):
-    # ✅ Use cloudscraper for API (bypasses Cloudflare)
     scraper = cloudscraper.create_scraper()
     api_url = f"https://nhentai.net/api/gallery/{code}"
     resp = scraper.get(api_url)
@@ -234,7 +233,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
             except:
                 pass
 
-        # ✅ Download PDF
+        # Download PDF
         async def dl_progress(cur, total):
             await progress(cur, total, "📥 Downloading")
 
@@ -245,7 +244,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
         else:
             await callback.edit_message_text("📤 Uploading PDF... 0%")
 
-        # ✅ Upload with progress
+        # Upload with progress
         async def upload_progress(cur, total):
             await progress(cur, total, "📤 Uploading")
 
@@ -265,7 +264,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 progress=upload_progress
             )
 
-        # ✅ Copy uploaded message to channel (no second upload)
+        # Copy uploaded message to channel (no second upload)
         try:
             await client.copy_message(
                 chat_id=-1002805198226,
@@ -287,8 +286,6 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 await callback.message.delete()
             except:
                 pass
-        #else:
-            #await callback.edit_message_text("✅ Done! PDF uploaded & copied.")
 
     except Exception as e:
         err = f"❌ Error: {e}"
