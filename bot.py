@@ -3,14 +3,13 @@ import asyncio, os, re
 from urllib.parse import urlparse
 import math
 import tempfile
-#from tqdm import tqdm
 from tqdm.asyncio import tqdm
 from datetime import datetime
 from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-import aiohttp
+import aiohttp, aiofiles
 import json
 import cloudscraper
 import pyromod.listen
@@ -44,6 +43,7 @@ class Bot(Client):
     def __init__(self):
         super().__init__(
             name="nhentaiBot",
+        ...
             api_id=APP_ID,
             api_hash=API_HASH,
             bot_token=TG_BOT_TOKEN,
@@ -86,7 +86,13 @@ app = Bot()
 
 # -------------- START HANDLER -------------- #
 @app.on_message(filters.command('start') & filters.private)
-async def start_command(_, message: Message):
+async def start_command(client, message: Message):
+    if message.text.startswith("/start dl_"):
+        # deep-link triggered
+        code = message.text.split("_", 1)[1]
+        await handle_download(client, message, code)
+        return
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔎 Search Manga", switch_inline_query_current_chat="")],
         [InlineKeyboardButton("💻 Contact Developer", url="https://t.me/rohit_1888")]
@@ -109,20 +115,20 @@ async def inline_search(client: Client, inline_query):
     query = inline_query.query.strip()
     page = int(inline_query.offset) if inline_query.offset else 1
 
-    results = await search_nhentai(query or None, page)
+    results = await search_nhentai(query or None, page, client.username)
     next_offset = str(page + 1) if len(results) == 10 else ""
     await inline_query.answer(results, cache_time=1, is_personal=True, next_offset=next_offset)
 
 
-# -------------- INLINE SEARCH -------------- #
-async def search_nhentai(query=None, page=1):
+# -------------- INLINE SEARCH FUNC -------------- #
+async def search_nhentai(query=None, page=1, bot_username=None):
     results = []
     scraper = cloudscraper.create_scraper()
 
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
     else:
-        url = f"https://nhentai.net/?page={page}"
+        url = f"https://nhentai.net/language/english/?page={page}"
 
     html = scraper.get(url).text
     soup = BeautifulSoup(html, "html.parser")
@@ -145,11 +151,12 @@ async def search_nhentai(query=None, page=1):
                 description=f"Code: {code}",
                 thumb_url=thumb,
                 input_message_content=InputTextMessageContent(
-                    message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                    disable_web_page_preview=False
+                    message_text=f"<b>{title}</b>\n🔗 <a href='https://nhentai.net/g/{code}/'>Read Online</a>\n\nCode: <code>{code}</code>",
+                    parse_mode="html",
+                    disable_web_page_preview=True
                 ),
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
+                    [InlineKeyboardButton("📥 Download PDF", url=f"https://t.me/{bot_username}?start=dl_{code}")]
                 ])
             )
         )
@@ -208,28 +215,21 @@ async def download_manga_as_pdf(code, progress_callback=None):
     os.rmdir(folder)
     return pdf_path
 
-# ------------ CALLBACK HANDLER ------------- #
-@app.on_callback_query(filters.regex(r"^download_(\d+)$"))
-async def handle_download(client: Client, callback: CallbackQuery):
-    code = callback.matches[0].group(1)
+
+# ------------ DOWNLOAD HANDLER ------------- #
+async def handle_download(client: Client, message: Message, code: str):
     pdf_path, msg, sent_photo, sent_pdf, thumb_path = None, None, None, None, None
+    chat_id = message.chat.id
 
     try:
-        chat_id = callback.message.chat.id if callback.message else callback.from_user.id
-
-        if callback.message:
-            msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
-        else:
-            await callback.answer("📥 ᴅᴏᴡɴʟᴏᴀᴅ...")
+        # Always create a dedicated progress message
+        msg = await message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
-                if msg:
-                    await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
+                await msg.edit(txt)
             except:
                 pass
 
@@ -266,10 +266,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
             caption=f"<b>{title}</b>\nCode: <code>{code}</code>"
         )
 
-        if msg:
-            await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
-        else:
-            await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅ... 0%")
+        await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
 
         # --- Upload PDF with thumbnail ---
         async def upload_progress(cur, total):
@@ -311,10 +308,8 @@ async def handle_download(client: Client, callback: CallbackQuery):
 
         # --- Remove progress message ---
         if msg:
-            await msg.delete()
-        elif callback.message:
             try:
-                await callback.message.delete()
+                await msg.delete()
             except:
                 pass
 
@@ -324,7 +319,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
             if msg:
                 await msg.edit(err)
             else:
-                await callback.edit_message_text(err)
+                await message.reply(err)
         except:
             pass
     finally:
