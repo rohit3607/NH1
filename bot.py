@@ -244,9 +244,18 @@ async def handle_download(client: Client, callback: CallbackQuery):
         else:
             await callback.edit_message_text("📤 Uploading PDF... 0%")
 
-        # Upload with progress
+        # Upload with progress (skip 100%)
         async def upload_progress(cur, total):
-            await progress(cur, total, "📤 Uploading")
+            percent = int((cur / total) * 100)
+            if percent < 100:  # ❌ no update at 100%
+                txt = f"📤 Uploading... {percent}%"
+                try:
+                    if msg:
+                        await msg.edit(txt)
+                    else:
+                        await callback.edit_message_text(txt)
+                except:
+                    pass
 
         try:
             sent_msg = await client.send_document(
@@ -263,6 +272,15 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 caption=f"📖 Manga: {code}",
                 progress=upload_progress
             )
+
+        # ✅ Delete progress message after upload is complete
+        try:
+            if msg:
+                await msg.delete()
+            elif callback.message:
+                await callback.message.delete()
+        except:
+            pass
 
         # Copy uploaded message to channel (no second upload)
         try:
@@ -278,14 +296,6 @@ async def handle_download(client: Client, callback: CallbackQuery):
                 from_chat_id=chat_id,
                 message_id=sent_msg.id
             )
-
-        if msg:
-            await msg.delete()
-        elif callback.message:
-            try:
-                await callback.message.delete()
-            except:
-                pass
 
     except Exception as e:
         err = f"❌ Error: {e}"
