@@ -212,7 +212,7 @@ async def download_manga_as_pdf(code, progress_callback=None):
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-    pdf_path, msg, sent_msg = None, None, None
+    pdf_path, msg, sent_msg, thumb_path = None, None, None, None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
@@ -233,52 +233,94 @@ async def handle_download(client: Client, callback: CallbackQuery):
             except:
                 pass
 
-        # Download PDF
+        # --- Download PDF ---
         async def dl_progress(cur, total):
             await progress(cur, total, "📥 Dᴏᴡɴʟᴏᴀᴅɪɴɢ")
 
         pdf_path = await download_manga_as_pdf(code, dl_progress)
+
+        # --- Download Cover (for thumbnail) ---
+        scraper = cloudscraper.create_scraper()
+        api_url = f"https://nhentai.net/api/gallery/{code}"
+        data = scraper.get(api_url).json()
+        media_id = data["media_id"]
+        cover = data["images"]["cover"]
+        ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
+        cover_ext = ext_map.get(cover["t"], "jpg")
+        cover_url = f"https://i.nhentai.net/galleries/{media_id}/cover.{cover_ext}"
+
+        thumb_path = f"thumb_{code}.{cover_ext}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(cover_url) as resp:
+                if resp.status == 200:
+                    with open(thumb_path, "wb") as f:
+                        f.write(await resp.read())
 
         if msg:
             await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
         else:
             await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
 
-        # Upload with progress
+        # --- Upload with thumbnail ---
         async def upload_progress(cur, total):
             await progress(cur, total, "📤 Uᴘʟᴏᴀᴅɪɴɢ")
 
-        try:
-            sent_msg = await client.send_document(
-                chat_id,
-                document=pdf_path,
-                caption=f"📖 Manga: {code}",
-                progress=upload_progress
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            sent_msg = await client.send_document(
-                chat_id,
-                document=pdf_path,
-                caption=f"📖 Manga: {code}",
-                progress=upload_progress
-            )
+        if LOG_CHANNEL != 0:
+            # Upload to log channel first
+            try:
+                sent_msg = await client.send_document(
+                    LOG_CHANNEL,
+                    document=pdf_path,
+                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    caption=f"📖 Manga: {code}",
+                    progress=upload_progress
+                )
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                sent_msg = await client.send_document(
+                    LOG_CHANNEL,
+                    document=pdf_path,
+                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    caption=f"📖 Manga: {code}",
+                    progress=upload_progress
+                )
 
-        # Copy uploaded message to channel (no second upload)
-        try:
-            await client.copy_message(
-                chat_id=LOG_CHANNEL,
-                from_chat_id=chat_id,
-                message_id=sent_msg.id
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.copy_message(
-                chat_id=LOG_CHANNEL,
-                from_chat_id=chat_id,
-                message_id=sent_msg.id
-            )
+            # Copy to user
+            try:
+                await client.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=LOG_CHANNEL,
+                    message_id=sent_msg.id
+                )
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await client.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=LOG_CHANNEL,
+                    message_id=sent_msg.id
+                )
 
+        else:
+            # Direct upload to user
+            try:
+                sent_msg = await client.send_document(
+                    chat_id,
+                    document=pdf_path,
+                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    caption=f"📖 Manga: {code}",
+                    progress=upload_progress
+                )
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                sent_msg = await client.send_document(
+                    chat_id,
+                    document=pdf_path,
+                    thumb=thumb_path if os.path.exists(thumb_path) else None,
+                    caption=f"📖 Manga: {code}",
+                    progress=upload_progress
+                )
+
+        # --- Remove progress message ---
         if msg:
             await msg.delete()
         elif callback.message:
@@ -297,8 +339,10 @@ async def handle_download(client: Client, callback: CallbackQuery):
         except:
             pass
     finally:
-        if pdf_path and os.path.exists(pdf_path):
-            os.remove(pdf_path)
+        # Cleanup
+        for f in [pdf_path, thumb_path]:
+            if f and os.path.exists(f):
+                os.remove(f)
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
