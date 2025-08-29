@@ -84,7 +84,7 @@ class Bot(Client):
 
 app = Bot()
 
-# ---------------- START HANDLER ---------------- #
+# -------------- START HANDLER -------------- #
 @app.on_message(filters.command('start') & filters.private)
 async def start_command(_, message: Message):
     keyboard = InlineKeyboardMarkup([
@@ -114,8 +114,8 @@ async def inline_search(client: Client, inline_query):
     await inline_query.answer(results, cache_time=1, is_personal=True, next_offset=next_offset)
 
 
-# ---------------- INLINE SEARCH ---------------- #
-async def search_nhentai(query=None, page=1, parent_msg_id=None):
+# -------------- INLINE SEARCH -------------- #
+async def search_nhentai(query=None, page=1):
     results = []
     scraper = cloudscraper.create_scraper()  # ✅ bypass Cloudflare
 
@@ -149,14 +149,12 @@ async def search_nhentai(query=None, page=1, parent_msg_id=None):
                     disable_web_page_preview=False
                 ),
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(
-                        "📥 Download PDF",
-                        callback_data=f"download_{code}|{parent_msg_id if parent_msg_id else 0}"
-                    )]
+                    [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
                 ])
             )
         )
     return results
+
 
 # ------------ PAGE DOWNLOADER -------------- #
 async def download_page(session, url, filename):
@@ -212,51 +210,93 @@ async def download_manga_as_pdf(code, progress_callback=None):
     return pdf_path
 
 # ------------ CALLBACK HANDLER ------------- #
-@app.on_callback_query(filters.regex(r"^download_(\d+)\|(\d+)$"))
+@app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-    parent_msg_id = int(callback.matches[0].group(2))  # ✅ results message ID
     pdf_path, msg, sent_msg = None, None, None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        # Answer callback
-        try:
+        if callback.message:
+            msg = await callback.message.reply("📥 Starting download...")
+        else:
             await callback.answer("📥 Starting download...")
-        except:
-            pass
 
-        # ✅ Delete button message
+        async def progress(cur, total, stage):
+            percent = int((cur / total) * 100)
+            txt = f"{stage}... {percent}%"
+            try:
+                if msg:
+                    await msg.edit(txt)
+                else:
+                    await callback.edit_message_text(txt)
+            except:
+                pass
+
+        # ✅ Download PDF
+        async def dl_progress(cur, total):
+            await progress(cur, total, "📥 Downloading")
+
+        pdf_path = await download_manga_as_pdf(code, dl_progress)
+
+        if msg:
+            await msg.edit("📤 Uploading PDF... 0%")
+        else:
+            await callback.edit_message_text("📤 Uploading PDF... 0%")
+
+        # ✅ Upload with progress
+        async def upload_progress(cur, total):
+            await progress(cur, total, "📤 Uploading")
+
         try:
-            if callback.message:
+            sent_msg = await client.send_document(
+                chat_id,
+                document=pdf_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            sent_msg = await client.send_document(
+                chat_id,
+                document=pdf_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
+
+        # ✅ Copy uploaded message to channel (no second upload)
+        try:
+            await client.copy_message(
+                chat_id=-1002805198226,
+                from_chat_id=chat_id,
+                message_id=sent_msg.id
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await client.copy_message(
+                chat_id=-1002805198226,
+                from_chat_id=chat_id,
+                message_id=sent_msg.id
+            )
+
+        if msg:
+            await msg.delete()
+        elif callback.message:
+            try:
                 await callback.message.delete()
-        except:
-            pass
-
-        # ✅ Delete parent results message as well
-        try:
-            await client.delete_messages(chat_id, parent_msg_id)
-        except:
-            pass
-
-        # Progress message
-        msg = await client.send_message(chat_id, "📥 Starting download...")
-
-        # (rest of your progress/download/upload code remains same...)
-
-        # ✅ Delete progress msg after upload
-        try:
-            if msg:
-                await msg.delete()
-        except:
-            pass
+            except:
+                pass
+        #else:
+            #await callback.edit_message_text("✅ Done! PDF uploaded & copied.")
 
     except Exception as e:
         err = f"❌ Error: {e}"
         try:
             if msg:
                 await msg.edit(err)
+            else:
+                await callback.edit_message_text(err)
         except:
             pass
     finally:
