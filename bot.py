@@ -3,13 +3,14 @@ import asyncio, os, re
 from urllib.parse import urlparse
 import math
 import tempfile
+#from tqdm import tqdm
 from tqdm.asyncio import tqdm
 from datetime import datetime
 from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-import aiohttp, aiofiles
+import aiohttp
 import json
 import cloudscraper
 import pyromod.listen
@@ -112,7 +113,8 @@ async def inline_search(client: Client, inline_query):
     next_offset = str(page + 1) if len(results) == 10 else ""
     await inline_query.answer(results, cache_time=1, is_personal=True, next_offset=next_offset)
 
-# -------------- INLINE SEARCH FUNCTION -------------- #
+
+# -------------- INLINE SEARCH -------------- #
 async def search_nhentai(query=None, page=1):
     results = []
     scraper = cloudscraper.create_scraper()
@@ -120,7 +122,7 @@ async def search_nhentai(query=None, page=1):
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
     else:
-        url = f"https://nhentai.net/language/english/?page={page}"
+        url = f"https://nhentai.net/?page={page}"
 
     html = scraper.get(url).text
     soup = BeautifulSoup(html, "html.parser")
@@ -143,9 +145,8 @@ async def search_nhentai(query=None, page=1):
                 description=f"Code: {code}",
                 thumb_url=thumb,
                 input_message_content=InputTextMessageContent(
-                    message_text=f"<b>{title}</b>\n🔗 <a href='https://nhentai.net/g/{code}/'>Read Online</a>\n\nCode: <code>{code}</code>",
-                    parse_mode="html",
-                    disable_web_page_preview=True
+                    message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
+                    disable_web_page_preview=False
                 ),
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
@@ -153,6 +154,7 @@ async def search_nhentai(query=None, page=1):
             )
         )
     return results
+
 
 # ------------ PAGE DOWNLOADER -------------- #
 async def download_page(session, url, filename):
@@ -210,104 +212,78 @@ async def download_manga_as_pdf(code, progress_callback=None):
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
-    pdf_path, msg, sent_photo, sent_pdf, thumb_path = None, None, None, None, None
+    pdf_path, msg, sent_msg = None, None, None
 
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        # Always create a dedicated progress message
-        msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
+        if callback.message:
+            msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
+        else:
+            await callback.answer("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
-                await msg.edit(txt)
+                if msg:
+                    await msg.edit(txt)
+                else:
+                    await callback.edit_message_text(txt)
             except:
                 pass
 
-        # --- Download PDF ---
+        # Download PDF
         async def dl_progress(cur, total):
             await progress(cur, total, "📥 Dᴏᴡɴʟᴏᴀᴅɪɴɢ")
 
         pdf_path = await download_manga_as_pdf(code, dl_progress)
 
-        # --- Get first page (for post + thumb) ---
-        scraper = cloudscraper.create_scraper()
-        api_url = f"https://nhentai.net/api/gallery/{code}"
-        data = scraper.get(api_url).json()
-        media_id = data["media_id"]
-        title = data["title"]["english"] or f"Code {code}"
+        if msg:
+            await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
+        else:
+            await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
 
-        first_page = data["images"]["pages"][0]   # use 1st page
-        ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-        ext = ext_map.get(first_page["t"], "jpg")
-        first_page_url = f"https://i.nhentai.net/galleries/{media_id}/1.{ext}"
-        thumb_path = f"thumb_{code}.jpg"
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(first_page_url) as resp:
-                if resp.status == 200:
-                    data_img = await resp.read()
-                    with open(thumb_path, "wb") as f:
-                        f.write(data_img)
-
-        # --- Send first image as post ---
-        sent_photo = await client.send_photo(
-            chat_id,
-            photo=thumb_path,
-            caption=f"<b>{title}</b>\nCode: <code>{code}</code>"
-        )
-
-        await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
-
-        # --- Upload PDF with thumbnail ---
+        # Upload with progress
         async def upload_progress(cur, total):
             await progress(cur, total, "📤 Uᴘʟᴏᴀᴅɪɴɢ")
 
-        sent_pdf = await client.send_document(
-            chat_id,
-            document=pdf_path,
-            thumb=thumb_path,
-            caption=f"📖 {title}\nCode: <code>{code}</code>",
-            progress=upload_progress
-        )
+        try:
+            sent_msg = await client.send_document(
+                chat_id,
+                document=pdf_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            sent_msg = await client.send_document(
+                chat_id,
+                document=pdf_path,
+                caption=f"📖 Manga: {code}",
+                progress=upload_progress
+            )
 
-        # --- Copy both to log channel ---
-        if LOG_CHANNEL != 0:
-            try:
-                await client.copy_message(
-                    LOG_CHANNEL,
-                    from_chat_id=chat_id,
-                    message_id=sent_photo.id
-                )
-                await client.copy_message(
-                    LOG_CHANNEL,
-                    from_chat_id=chat_id,
-                    message_id=sent_pdf.id
-                )
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                await client.copy_message(
-                    LOG_CHANNEL,
-                    from_chat_id=chat_id,
-                    message_id=sent_photo.id
-                )
-                await client.copy_message(
-                    LOG_CHANNEL,
-                    from_chat_id=chat_id,
-                    message_id=sent_pdf.id
-                )
+        # Copy uploaded message to channel (no second upload)
+        try:
+            await client.copy_message(
+                chat_id=LOG_CHANNEL,
+                from_chat_id=chat_id,
+                message_id=sent_msg.id
+            )
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+            await client.copy_message(
+                chat_id=LOG_CHANNEL,
+                from_chat_id=chat_id,
+                message_id=sent_msg.id
+            )
 
-        # --- Remove progress + button message ---
         if msg:
+            await msg.delete()
+        elif callback.message:
             try:
-                await msg.delete()  # progress message
-            except:
-                pass
-        if callback.message:
-            try:
-                await callback.message.delete()  # original inline button
+                await callback.message.delete()
             except:
                 pass
 
@@ -317,14 +293,12 @@ async def handle_download(client: Client, callback: CallbackQuery):
             if msg:
                 await msg.edit(err)
             else:
-                await callback.message.reply(err)
+                await callback.edit_message_text(err)
         except:
             pass
     finally:
-        # Cleanup
-        for f in [pdf_path, thumb_path]:
-            if f and os.path.exists(f):
-                os.remove(f)
+        if pdf_path and os.path.exists(pdf_path):
+            os.remove(pdf_path)
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
