@@ -221,7 +221,7 @@ async def make_thumbnail(input_url: str, thumb_path: str):
     try:
         img = Image.open(thumb_path).convert("RGB")
 
-        # --- Crop to square (center crop) ---
+        # --- Center crop to square only (no resize) ---
         w, h = img.size
         min_side = min(w, h)
         left = (w - min_side) // 2
@@ -230,12 +230,9 @@ async def make_thumbnail(input_url: str, thumb_path: str):
         bottom = top + min_side
         img = img.crop((left, top, right, bottom))
 
-        # --- Resize to 320x320 ---
-        img = img.resize((320, 320), Image.LANCZOS)
-
-        # Save as optimized JPEG
+        # Save directly, no resize, max quality
         thumb_path = thumb_path.rsplit(".", 1)[0] + ".jpg"
-        img.save(thumb_path, "JPEG", quality=90, optimize=True)
+        img.save(thumb_path, "JPEG", quality=95, optimize=True)
     except Exception as e:
         print("❌ Thumbnail processing failed:", e)
         return None
