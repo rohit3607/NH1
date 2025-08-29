@@ -267,14 +267,14 @@ async def handle_download(client: Client, callback: CallbackQuery):
         # Copy uploaded message to channel (no second upload)
         try:
             await client.copy_message(
-                chat_id=-1002805198226,
+                chat_id=LOG_CHANNEL,
                 from_chat_id=chat_id,
                 message_id=sent_msg.id
             )
         except FloodWait as e:
             await asyncio.sleep(e.value)
             await client.copy_message(
-                chat_id=-1002805198226,
+                chat_id=LOG_CHANNEL,
                 from_chat_id=chat_id,
                 message_id=sent_msg.id
             )
