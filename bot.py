@@ -1,5 +1,5 @@
 from aiohttp import web
-import asyncio, os, re
+import asyncio, os, re, fitz, requests
 from urllib.parse import urlparse
 import math
 import tempfile
@@ -165,54 +165,60 @@ async def download_page(session, url, filename):
             f.write(await resp.read())
 
 # -------------- PDF GENERATOR -------------- #
-async def download_manga_as_pdf(code, progress_callback=None):
-    scraper = cloudscraper.create_scraper()
-    api_url = f"https://nhentai.net/api/gallery/{code}"
-    resp = scraper.get(api_url)
-    if resp.status_code != 200:
-        raise Exception("Gallery not found.")
-    data = resp.json()
 
-    folder = f"nhentai_{code}"
-    os.makedirs(folder, exist_ok=True)
+async def download_manga_as_pdf(code: str, progress_callback=None):
+    pdf_path = f"{code}.pdf"
+    thumb_path = f"{code}_thumb.jpg"
 
-    num_pages = len(data["images"]["pages"])
-    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-    media_id = data["media_id"]
-    image_paths = []
+    try:
+        if progress_callback:
+            await progress_callback(0, 100, "🔍 Fetching pages")
 
-    headers = {"User-Agent": "Mozilla/5.0"}
-    async with aiohttp.ClientSession() as session:
-        for i, page in enumerate(data["images"]["pages"], start=1):
-            ext = ext_map.get(page["t"], "jpg")
-            url = f"https://i.nhentai.net/galleries/{media_id}/{i}.{ext}"
-            path = os.path.join(folder, f"{i:03}.{ext}")
-            await download_page(session, url, path)
-            image_paths.append(path)
+        # ✅ Get gallery info
+        url = f"https://nhentai.net/g/{code}/"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            raise Exception(f"Failed to fetch gallery page: {r.status_code}")
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        img_tags = soup.select("#thumbnail-container img")
+
+        if not img_tags:
+            raise Exception("No pages found for this code!")
+
+        img_urls = []
+        for img in img_tags:
+            src = img.get("data-src") or img.get("src")
+            if src.startswith("//"):
+                src = "https:" + src
+            img_urls.append(src.replace("t.nhentai.net", "i.nhentai.net").replace("t.jpg", ".jpg"))
+
+        total = len(img_urls)
+
+        # ✅ Build PDF
+        doc = fitz.open()
+        for i, img_url in enumerate(img_urls, 1):
+            r = requests.get(img_url, headers={"User-Agent": "Mozilla/5.0"})
+            img = Image.open(BytesIO(r.content)).convert("RGB")
+
+            rect = fitz.Rect(0, 0, img.width, img.height)
+            page = doc.new_page(width=img.width, height=img.height)
+            pix = fitz.Pixmap(fitz.csRGB, img.width, img.height, img.tobytes())
+            page.insert_image(rect, stream=r.content)
+
+            if i == 1:  # save first page as thumb
+                img.save(thumb_path, "JPEG")
+
             if progress_callback:
-                await progress_callback(i, num_pages, "Downloading")
+                await progress_callback(i, total, "📖 Downloading")
 
-    # Generate PDF
-    pdf_path = f"{folder}.pdf"
-    first_img = Image.open(image_paths[0]).convert("RGB")
-    with open(pdf_path, "wb") as f:
-        first_img.save(f, format="PDF", save_all=True, append_images=[
-            Image.open(p).convert("RGB") for p in image_paths[1:]
-        ])
+        doc.save(pdf_path)
+        doc.close()
 
-    # ✅ Cover thumbnail
-    thumb_url = f"https://t.nhentai.net/galleries/{media_id}/cover.jpg"
-    thumb_path = os.path.join(folder, "thumb.jpg")
-    scraper.get(thumb_url, stream=True).raw.decode_content = True
-    with open(thumb_path, "wb") as f:
-        f.write(scraper.get(thumb_url).content)
+        return pdf_path, thumb_path
 
-    # Cleanup pages
-    for img in image_paths:
-        os.remove(img)
-    os.rmdir(folder)
-
-    return pdf_path, thumb_path
+    except Exception as e:
+        raise Exception(f"Download failed: {e}")
 
 # ------------ CALLBACK HANDLER ------------- #
 
