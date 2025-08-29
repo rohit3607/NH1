@@ -113,22 +113,20 @@ async def inline_search(client: Client, inline_query):
     next_offset = str(page + 1) if len(results) == 10 else ""
     await inline_query.answer(results, cache_time=1, is_personal=True, next_offset=next_offset)
 
-# -------------- INLINE SEARCH -------------- #
+
+# ---------------- INLINE SEARCH ---------------- #
 async def search_nhentai(query=None, page=1):
     results = []
+    scraper = cloudscraper.create_scraper()  # ✅ bypass Cloudflare
 
     if query:
         url = f"https://nhentai.net/search/?q={query.replace(' ', '+')}&page={page}"
     else:
         url = f"https://nhentai.net/?page={page}"
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                return []
-            html = await response.text()
-
+    html = scraper.get(url).text
     soup = BeautifulSoup(html, "html.parser")
+
     gallery_items = soup.select(".gallery")
 
     for item in gallery_items[:10]:
@@ -136,7 +134,6 @@ async def search_nhentai(query=None, page=1):
         code = link.split("/")[2]
         title = item.select_one(".caption").text.strip() if item.select_one(".caption") else f"Code {code}"
 
-        # ✅ Always prefer data-src (real thumbnail), ignore placeholder src
         img_tag = item.select_one("img")
         thumb = img_tag.get("data-src") or img_tag.get("src")
         if thumb and thumb.startswith("//"):
@@ -149,7 +146,7 @@ async def search_nhentai(query=None, page=1):
                 thumb_url=thumb,
                 input_message_content=InputTextMessageContent(
                     message_text=f"**{title}**\n🔗 [Read Now](https://nhentai.net/g/{code}/)\n\n`Code:` {code}",
-                    disable_web_page_preview=True
+                    disable_web_page_preview=False
                 ),
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{code}")]
