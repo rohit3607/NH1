@@ -284,7 +284,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
         first_page_url = f"https://i.nhentai.net/galleries/{media_id}/1.{ext}"
 
         thumb_path = f"thumb_{code}.jpg"
-        thumb_path = await make_thumbnail(first_page_url, thumb_path)
+        #thumb_path = await make_thumbnail(first_page_url, thumb_path)
 
         if msg:
             await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
