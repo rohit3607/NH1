@@ -223,29 +223,47 @@ async def handle_download(client: Client, callback: CallbackQuery):
         else:
             await callback.answer("📥 Starting download...")
 
-        async def progress(cur, total, stage):
-            percent = int((cur / total) * 100)
+        # ---------------- PROGRESS HANDLER ---------------- #
+        async def progress(cur, total, stage="Downloading"):
+            percent = int((cur / total) * 100) if total else 0
             txt = f"{stage}... {percent}%"
             try:
                 if msg:
                     await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
             except:
                 pass
 
+        # ✅ Download manga PDF
         pdf_path = await download_manga_as_pdf(code, progress)
 
         if msg:
             await msg.edit("📤 Uploading PDF...")
-        else:
-            await callback.edit_message_text("📤 Uploading PDF...")
+
+        # ---------------- SAFE UPLOAD WITH FLOODWAIT ---------------- #
+        async def safe_upload(chat_id, path, caption):
+            while True:
+                try:
+                    await client.send_document(
+                        chat_id,
+                        document=path,
+                        caption=caption,
+                        progress=progress,
+                        progress_args=("Uploading",)
+                    )
+                    break
+                except FloodWait as e:
+                    # ⏳ Retry after FloodWait
+                    await asyncio.sleep(e.value)
+                except Exception as e:
+                    if msg:
+                        await msg.edit(f"❌ Upload Error: {e}")
+                    break
 
         # ✅ Send to user
-        await client.send_document(chat_id, document=pdf_path, caption=f"📖 Manga: {code}")
+        await safe_upload(chat_id, pdf_path, f"📖 Manga: {code}")
 
         # ✅ Copy to channel
-        await client.send_document(-1002805198226, document=pdf_path, caption=f"📖 Manga: {code}")
+        await safe_upload(-1002805198226, pdf_path, f"📖 Manga: {code}")
 
     except Exception as e:
         err = f"❌ Error: {e}"
