@@ -283,6 +283,13 @@ async def handle_download(client: Client, callback: CallbackQuery):
         ext = ext_map.get(first_page["t"], "jpg")
         first_page_url = f"https://i.nhentai.net/galleries/{media_id}/1.{ext}"
 
+        async with aiohttp.ClientSession() as session:
+            async with session.get(first_page_url) as resp:
+                if resp.status == 200:
+                    data = await resp.read()
+                    with open(thumb_path, "wb") as f:
+                        f.write(data)
+
         thumb_path = f"thumb_{code}.jpg"
         #thumb_path = await make_thumbnail(first_page_url, thumb_path)
 
