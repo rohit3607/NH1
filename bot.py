@@ -224,21 +224,22 @@ async def handle_download(client: Client, callback: CallbackQuery):
             await callback.answer("📥 Starting download...")
 
         # ---------------- PROGRESS HANDLER ---------------- #
-        def progress(cur, total, stage="Downloading"):
-            percent = int((cur / total) * 100) if total else 0
+        async def progress(cur, total, stage="Downloading"):
+            if total == 0:
+                return
+            percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
-
-            async def edit_message():
-                try:
-                    if msg:
-                        await msg.edit(txt)
-                except:
-                    pass
-
-            client.loop.create_task(edit_message())
+            try:
+                if msg:
+                    await msg.edit(txt)
+            except:
+                pass
 
         # ✅ Download manga PDF
-        pdf_path = await download_manga_as_pdf(code, lambda c, t, s="Downloading": progress(c, t, s))
+        pdf_path = await download_manga_as_pdf(
+            code,
+            lambda cur, total: asyncio.create_task(progress(cur, total, "Downloading"))
+        )
 
         if msg:
             await msg.edit("📤 Uploading PDF...")
@@ -247,28 +248,31 @@ async def handle_download(client: Client, callback: CallbackQuery):
         async def safe_upload(chat_id, path, caption):
             while True:
                 try:
-                    await client.send_document(
+                    sent_msg = await client.send_document(
                         chat_id,
                         document=path,
                         caption=caption,
-                        progress=progress,
-                        progress_args=("Uploading",)
+                        progress=lambda cur, total: asyncio.create_task(progress(cur, total, "Uploading"))
                     )
-                    break
+                    return sent_msg
                 except FloodWait as e:
                     await asyncio.sleep(e.value)
                 except Exception as e:
                     if msg:
                         await msg.edit(f"❌ Upload Error: {e}")
-                    break
+                    return None
 
-        # ✅ Send to user
-        await safe_upload(chat_id, pdf_path, f"📖 Manga: {code}")
+        # ✅ Upload to USER first
+        sent_msg = await safe_upload(chat_id, pdf_path, f"📖 Manga: {code}")
 
-        # ✅ Copy to channel
-        await safe_upload(-1002805198226, pdf_path, f"📖 Manga: {code}")
+        if sent_msg:
+            # ✅ Copy to channel instantly (no second upload)
+            await sent_msg.copy(
+                -1002805198226,
+                caption=f"📖 Manga: {code}"
+            )
 
-        # ✅ Delete progress message after success
+        # ✅ Delete progress message after both done
         if msg:
             await msg.delete()
 
