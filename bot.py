@@ -208,39 +208,6 @@ async def download_manga_as_pdf(code, progress_callback=None):
     os.rmdir(folder)
     return pdf_path
 
-# ------------ THUMBNAIL ------------- #
-
-async def make_thumbnail(input_url: str, thumb_path: str):
-    # Download first page
-    async with aiohttp.ClientSession() as session:
-        async with session.get(input_url) as resp:
-            if resp.status == 200:
-                data = await resp.read()
-                with open(thumb_path, "wb") as f:
-                    f.write(data)
-
-    try:
-        img = Image.open(thumb_path).convert("RGB")
-        w, h = img.size
-
-        # If Telegram rejects non-square thumbs, crop center to square
-        if w != h:
-            min_side = min(w, h)
-            left = (w - min_side) // 2
-            top = (h - min_side) // 2
-            right = left + min_side
-            bottom = top + min_side
-            img = img.crop((left, top, right, bottom))
-
-        # Save as high-quality JPEG (Telegram loves JPEGs for thumbs)
-        thumb_path = os.path.splitext(thumb_path)[0] + ".jpg"
-        img.save(thumb_path, "JPEG", quality=95, optimize=True)
-
-    except Exception as e:
-        print("❌ Thumbnail processing failed:", e)
-        return None
-
-    return thumb_path
 
 # ------------ CALLBACK HANDLER ------------- #
 @app.on_callback_query(filters.regex(r"^download_(\d+)$"))
@@ -251,19 +218,14 @@ async def handle_download(client: Client, callback: CallbackQuery):
     try:
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
-        if callback.message:
-            msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
-        else:
-            await callback.answer("📥 ᴅᴏᴡɴʟᴏᴀᴅ...")
+        # Always create a dedicated progress message
+        msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
 
         async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
-                if msg:
-                    await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
+                await msg.edit(txt)
             except:
                 pass
 
@@ -300,10 +262,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
             caption=f"<b>{title}</b>\nCode: <code>{code}</code>"
         )
 
-        if msg:
-            await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
-        else:
-            await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅ... 0%")
+        await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
 
         # --- Upload PDF with thumbnail ---
         async def upload_progress(cur, total):
@@ -343,12 +302,15 @@ async def handle_download(client: Client, callback: CallbackQuery):
                     message_id=sent_pdf.id
                 )
 
-        # --- Remove progress message ---
+        # --- Remove progress + button message ---
         if msg:
-            await msg.delete()
-        elif callback.message:
             try:
-                await callback.message.delete()
+                await msg.delete()  # progress message
+            except:
+                pass
+        if callback.message:
+            try:
+                await callback.message.delete()  # original inline button
             except:
                 pass
 
@@ -358,7 +320,7 @@ async def handle_download(client: Client, callback: CallbackQuery):
             if msg:
                 await msg.edit(err)
             else:
-                await callback.edit_message_text(err)
+                await callback.message.reply(err)
         except:
             pass
     finally:
