@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
-import aiohttp, aiofiles
+import aiohttp
 import json
 import cloudscraper
 import pyromod.listen
@@ -47,7 +47,7 @@ class Bot(Client):
             api_id=APP_ID,
             api_hash=API_HASH,
             bot_token=TG_BOT_TOKEN,
-            workers=50
+            workers=4
         )
         self.LOGGER = LOGGER
 
@@ -155,28 +155,18 @@ async def search_nhentai(query=None, page=1):
         )
     return results
 
-
-# =============== GENERATE THUMBNAIL ================= #
-async def generate_thumbnail(image_path, thumb_path):
-    img = Image.open(image_path)
-    img.thumbnail((320, 320))
-    img.save(thumb_path, "JPEG")
-    return thumb_path
-
-
-# =============== PAGE DOWNLOADER ================= #
+# ------------ PAGE DOWNLOADER -------------- #
 async def download_page(session, url, filename):
     headers = {"User-Agent": "Mozilla/5.0"}
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
             raise Exception(f"Failed to download: {url}")
-        data = await resp.read()
-        async with aiofiles.open(filename, "wb") as f:
-            await f.write(data)
+        with open(filename, "wb") as f:
+            f.write(await resp.read())
 
-
-# =============== MANGA TO PDF ================= #
+# -------------- PDF GENERATOR -------------- #
 async def download_manga_as_pdf(code, progress_callback=None):
+    # ✅ Use cloudscraper for API (bypasses Cloudflare)
     scraper = cloudscraper.create_scraper()
     api_url = f"https://nhentai.net/api/gallery/{code}"
     resp = scraper.get(api_url)
@@ -193,6 +183,7 @@ async def download_manga_as_pdf(code, progress_callback=None):
     media_id = data["media_id"]
     image_paths = []
 
+    headers = {"User-Agent": "Mozilla/5.0"}
     async with aiohttp.ClientSession() as session:
         for i, page in enumerate(data["images"]["pages"], start=1):
             ext = ext_map.get(page["t"], "jpg")
@@ -200,38 +191,28 @@ async def download_manga_as_pdf(code, progress_callback=None):
             path = os.path.join(folder, f"{i:03}.{ext}")
             await download_page(session, url, path)
             image_paths.append(path)
-
             if progress_callback:
                 await progress_callback(i, num_pages, "Downloading")
 
     # Generate PDF
     pdf_path = f"{folder}.pdf"
     first_img = Image.open(image_paths[0]).convert("RGB")
-    first_img.save(
-        pdf_path,
-        format="PDF",
-        save_all=True,
-        append_images=[Image.open(p).convert("RGB") for p in image_paths[1:]]
-    )
+    with open(pdf_path, "wb") as f:
+        first_img.save(f, format="PDF", save_all=True, append_images=[
+            Image.open(p).convert("RGB") for p in image_paths[1:]
+        ])
 
-    # Thumbnail
-    thumb_path = f"{folder}_thumb.jpg"
-    await generate_thumbnail(image_paths[0], thumb_path)
-
-    # Cleanup images
+    # Cleanup
     for img in image_paths:
         os.remove(img)
     os.rmdir(folder)
+    return pdf_path
 
-    return pdf_path, thumb_path
-
-
-# =============== CALLBACK HANDLER ================= #
-@Client.on_callback_query(filters.regex(r"^download_(\d+)$"))
+# ------------ CALLBACK HANDLER ------------- #
+@app.on_callback_query(filters.regex(r"^download_(\d+)$"))
 async def handle_download(client: Client, callback: CallbackQuery):
     code = callback.matches[0].group(1)
     pdf_path = None
-    thumb_path = None
     msg = None
 
     try:
@@ -242,65 +223,29 @@ async def handle_download(client: Client, callback: CallbackQuery):
         else:
             await callback.answer("📥 Starting download...")
 
-        # Progress function
-        async def progress(cur, total, stage="Downloading"):
-            if total == 0:
-                return
+        async def progress(cur, total, stage):
             percent = int((cur / total) * 100)
             txt = f"{stage}... {percent}%"
             try:
                 if msg:
                     await msg.edit(txt)
+                else:
+                    await callback.edit_message_text(txt)
             except:
                 pass
 
-        # Download manga as PDF
-        pdf_path, thumb_path = await download_manga_as_pdf(code, progress)
+        pdf_path = await download_manga_as_pdf(code, progress)
 
         if msg:
             await msg.edit("📤 Uploading PDF...")
+        else:
+            await callback.edit_message_text("📤 Uploading PDF...")
 
-        # Upload to user
-        try:
-            await client.send_document(
-                chat_id,
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}",
-                progress=progress,
-                progress_args=("Uploading",)
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.send_document(
-                chat_id,
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}",
-                progress=progress,
-                progress_args=("Uploading",)
-            )
+        # ✅ Send to user
+        await client.send_document(chat_id, document=pdf_path, caption=f"📖 Manga: {code}")
 
-        # Upload to channel
-        try:
-            await client.send_document(
-                -1002805198226,
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}",
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.send_document(
-                -1002805198226,
-                document=pdf_path,
-                thumb=thumb_path,
-                caption=f"📖 Manga: {code}",
-            )
-
-        # ✅ Delete progress message
-        if msg:
-            await msg.delete()
+        # ✅ Copy to channel
+        await client.send_document(-1002805198226, document=pdf_path, caption=f"📖 Manga: {code}")
 
     except Exception as e:
         err = f"❌ Error: {e}"
@@ -314,8 +259,6 @@ async def handle_download(client: Client, callback: CallbackQuery):
     finally:
         if pdf_path and os.path.exists(pdf_path):
             os.remove(pdf_path)
-        if thumb_path and os.path.exists(thumb_path):
-            os.remove(thumb_path)
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
