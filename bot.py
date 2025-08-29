@@ -218,13 +218,24 @@ async def make_thumbnail(input_url: str, thumb_path: str):
                 with open(thumb_path, "wb") as f:
                     f.write(data)
 
-    # Open with Pillow and resize/compress
     try:
-        img = Image.open(thumb_path)
-        img = img.convert("RGB")  # force JPEG compatible
-        img.thumbnail((320, 320))  # max size 320x320
+        img = Image.open(thumb_path).convert("RGB")
+
+        # --- Crop to square (center crop) ---
+        w, h = img.size
+        min_side = min(w, h)
+        left = (w - min_side) // 2
+        top = (h - min_side) // 2
+        right = left + min_side
+        bottom = top + min_side
+        img = img.crop((left, top, right, bottom))
+
+        # --- Resize to 320x320 ---
+        img = img.resize((320, 320), Image.LANCZOS)
+
+        # Save as optimized JPEG
         thumb_path = thumb_path.rsplit(".", 1)[0] + ".jpg"
-        img.save(thumb_path, "JPEG", quality=85, optimize=True)
+        img.save(thumb_path, "JPEG", quality=90, optimize=True)
     except Exception as e:
         print("❌ Thumbnail processing failed:", e)
         return None
