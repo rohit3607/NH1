@@ -136,25 +136,25 @@ async def update_bot(client, message):
 @app.on_message(filters.command("list") & filters.user(OWNER_ID))
 async def list_files(_, message: Message):
     try:
-        files = os.listdir(BASE_DIR)
-        if not files:
-            return await message.reply_text("📂 Directory is empty")
+        base = os.path.expanduser("~")  # USER FILES
+        files = os.listdir(base)
 
-        files = files[:MAX_LIST_ITEMS]
+        text = f"📁 <b>User Files ({base})</b>\n\n"
 
-        text = "📁 <b>Files on VPS</b>\n\n"
-        for f in files:
-            path = os.path.join(BASE_DIR, f)
-            icon = "📂" if os.path.isdir(path) else "📄"
-            size = ""
-            if os.path.isfile(path):
-                size = f" ({os.path.getsize(path)//1024} KB)"
-            text += f"{icon} <code>{f}</code>{size}\n"
+        for f in sorted(files):
+            path = os.path.join(base, f)
+            if os.path.isdir(path):
+                text += f"📂 <code>{f}/</code>\n"
+            else:
+                size = os.path.getsize(path) // 1024
+                text += f"📄 <code>{f}</code> ({size} KB)\n"
 
         await message.reply_text(text)
 
     except Exception as e:
         await message.reply_text(f"❌ Error:\n<pre>{e}</pre>")
+
+
 
 @app.on_message(filters.command("get") & filters.user(OWNER_ID))
 async def get_file(_, message: Message):
