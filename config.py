@@ -24,7 +24,7 @@ START_PIC = os.environ.get("START_PIC", "https://telegra.ph/file/ec17880d61180d3
 
 #--------------------------------------------
 
-BASE_DIR = os.getcwd()   # or "/root" or "/home/ubuntu"
+BASE_DIR = os.path.expanduser("~")
 MAX_LIST_ITEMS = 100
 
 
