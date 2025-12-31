@@ -136,15 +136,15 @@ async def update_bot(client, message):
 @app.on_message(filters.command("list") & filters.user(OWNER_ID))
 async def list_files(_, message: Message):
     try:
-        base = os.path.expanduser("~")  # USER FILES
-        files = os.listdir(base)
+        base = os.path.expanduser("~")
+        files = sorted(os.listdir(base))
 
-        text = f"📁 <b>User Files ({base})</b>\n\n"
+        text = "📁 <b>VPS Home Directory (~)</b>\n\n"
 
-        for f in sorted(files):
+        for f in files:
             path = os.path.join(base, f)
             if os.path.isdir(path):
-                text += f"📂 <code>{f}/</code>\n"
+                text += f"📂 <code>{f}</code>\n"
             else:
                 size = os.path.getsize(path) // 1024
                 text += f"📄 <code>{f}</code> ({size} KB)\n"
@@ -153,7 +153,6 @@ async def list_files(_, message: Message):
 
     except Exception as e:
         await message.reply_text(f"❌ Error:\n<pre>{e}</pre>")
-
 
 
 @app.on_message(filters.command("get") & filters.user(OWNER_ID))
