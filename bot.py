@@ -3,7 +3,8 @@ import asyncio, os, re
 from urllib.parse import urlparse
 import math
 import tempfile
-#from tqdm import tqdm
+import zipfile
+import shutil
 from tqdm.asyncio import tqdm
 from datetime import datetime
 from bs4 import BeautifulSoup
@@ -130,6 +131,72 @@ async def update_bot(client, message):
 
     except Exception as e:
         await msg.edit(f"⚠️ Error: {e}")
+
+
+@app.on_message(filters.command("list") & filters.user(OWNER_ID))
+async def list_files(_, message: Message):
+    try:
+        files = os.listdir(BASE_DIR)
+        if not files:
+            return await message.reply_text("📂 Directory is empty")
+
+        files = files[:MAX_LIST_ITEMS]
+
+        text = "📁 <b>Files on VPS</b>\n\n"
+        for f in files:
+            path = os.path.join(BASE_DIR, f)
+            icon = "📂" if os.path.isdir(path) else "📄"
+            size = ""
+            if os.path.isfile(path):
+                size = f" ({os.path.getsize(path)//1024} KB)"
+            text += f"{icon} <code>{f}</code>{size}\n"
+
+        await message.reply_text(text)
+
+    except Exception as e:
+        await message.reply_text(f"❌ Error:\n<pre>{e}</pre>")
+
+@app.on_message(filters.command("get") & filters.user(OWNER_ID))
+async def get_file(_, message: Message):
+    if len(message.command) < 2:
+        return await message.reply_text("❗ Usage:\n<code>/get filename_or_folder</code>")
+
+    name = " ".join(message.command[1:])
+    target = os.path.join(BASE_DIR, name)
+
+    if not os.path.exists(target):
+        return await message.reply_text("❌ File or folder not found")
+
+    msg = await message.reply_text("📦 Preparing ZIP...")
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+            zip_path = tmp.name
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            if os.path.isfile(target):
+                zipf.write(target, arcname=os.path.basename(target))
+            else:
+                for root, _, files in os.walk(target):
+                    for file in files:
+                        full_path = os.path.join(root, file)
+                        arc = os.path.relpath(full_path, BASE_DIR)
+                        zipf.write(full_path, arc)
+
+        await msg.edit("🚀 Uploading ZIP...")
+
+        await message.reply_document(
+            zip_path,
+            caption=f"📁 <b>{name}</b>\n📦 Zipped from VPS"
+        )
+
+        os.remove(zip_path)
+        await msg.delete()
+
+    except FloodWait as fw:
+        await asyncio.sleep(fw.value)
+    except Exception as e:
+        await msg.edit(f"❌ Failed:\n<pre>{e}</pre>")
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
