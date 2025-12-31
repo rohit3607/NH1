@@ -133,64 +133,64 @@ async def update_bot(client, message):
         await msg.edit(f"⚠️ Error: {e}")
 
 
-@app.on_message(filters.command("list") & filters.user(OWNER_ID))
-async def list_files(_, message: Message):
-    try:
-        base = os.path.expanduser("~")
-        files = sorted(os.listdir(base))
+BASE_DIR = "/"
 
-        text = "📁 <b>VPS Home Directory (~)</b>\n\n"
+@app.on_message(filters.command("list") & filters.user(OWNER_ID))
+async def list_agent_fs(_, message: Message):
+    try:
+        files = sorted(os.listdir("/"))
+
+        text = "📁 <b>Agent Filesystem (/)</b>\n\n"
 
         for f in files:
-            path = os.path.join(base, f)
+            path = os.path.join("/", f)
             if os.path.isdir(path):
-                text += f"📂 <code>{f}</code>\n"
+                text += f"📂 <code>{f}/</code>\n"
             else:
-                size = os.path.getsize(path) // 1024
-                text += f"📄 <code>{f}</code> ({size} KB)\n"
+                try:
+                    size = os.path.getsize(path) // 1024
+                    text += f"📄 <code>{f}</code> ({size} KB)\n"
+                except:
+                    text += f"📄 <code>{f}</code>\n"
 
         await message.reply_text(text)
 
     except Exception as e:
         await message.reply_text(f"❌ Error:\n<pre>{e}</pre>")
 
-
 @app.on_message(filters.command("get") & filters.user(OWNER_ID))
-async def get_file(_, message: Message):
+async def get_agent_file(_, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text("❗ Usage:\n<code>/get folder_or_file</code>")
+        return await message.reply_text("❗ Usage:\n<code>/get path</code>\nExample: <code>/get /app</code>")
 
-    base = os.path.expanduser("~")
-    name = " ".join(message.command[1:])
-    target = os.path.join(base, name)
+    path = message.command[1]
 
-    # Security: stay inside HOME
-    if not os.path.realpath(target).startswith(base):
-        return await message.reply_text("❌ Access denied")
+    if not os.path.exists(path):
+        return await message.reply_text("❌ Path not found")
 
-    if not os.path.exists(target):
-        return await message.reply_text("❌ File or folder not found")
+    msg = await message.reply_text("📦 Zipping agent files...")
 
-    msg = await message.reply_text("📦 Zipping...")
+    import zipfile, tempfile
 
     try:
-        import zipfile, tempfile
-
         with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
             zip_path = tmp.name
 
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            if os.path.isfile(target):
-                zipf.write(target, arcname=os.path.basename(target))
+            if os.path.isfile(path):
+                zipf.write(path, arcname=os.path.basename(path))
             else:
-                for root, _, files in os.walk(target):
-                    for file in files:
-                        full = os.path.join(root, file)
-                        arc = os.path.relpath(full, base)
+                for root, _, files in os.walk(path):
+                    for f in files:
+                        full = os.path.join(root, f)
+                        arc = full.lstrip("/")
                         zipf.write(full, arc)
 
-        await msg.edit("🚀 Uploading...")
-        await message.reply_document(zip_path, caption=f"📁 {name}")
+        await message.reply_document(
+            zip_path,
+            caption=f"📦 Agent files: <code>{path}</code>"
+        )
+
         os.remove(zip_path)
         await msg.delete()
 
