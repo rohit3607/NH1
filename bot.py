@@ -158,17 +158,24 @@ async def list_files(_, message: Message):
 @app.on_message(filters.command("get") & filters.user(OWNER_ID))
 async def get_file(_, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text("❗ Usage:\n<code>/get filename_or_folder</code>")
+        return await message.reply_text("❗ Usage:\n<code>/get folder_or_file</code>")
 
+    base = os.path.expanduser("~")
     name = " ".join(message.command[1:])
-    target = os.path.join(BASE_DIR, name)
+    target = os.path.join(base, name)
+
+    # Security: stay inside HOME
+    if not os.path.realpath(target).startswith(base):
+        return await message.reply_text("❌ Access denied")
 
     if not os.path.exists(target):
         return await message.reply_text("❌ File or folder not found")
 
-    msg = await message.reply_text("📦 Preparing ZIP...")
+    msg = await message.reply_text("📦 Zipping...")
 
     try:
+        import zipfile, tempfile
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
             zip_path = tmp.name
 
@@ -178,24 +185,17 @@ async def get_file(_, message: Message):
             else:
                 for root, _, files in os.walk(target):
                     for file in files:
-                        full_path = os.path.join(root, file)
-                        arc = os.path.relpath(full_path, BASE_DIR)
-                        zipf.write(full_path, arc)
+                        full = os.path.join(root, file)
+                        arc = os.path.relpath(full, base)
+                        zipf.write(full, arc)
 
-        await msg.edit("🚀 Uploading ZIP...")
-
-        await message.reply_document(
-            zip_path,
-            caption=f"📁 <b>{name}</b>\n📦 Zipped from VPS"
-        )
-
+        await msg.edit("🚀 Uploading...")
+        await message.reply_document(zip_path, caption=f"📁 {name}")
         os.remove(zip_path)
         await msg.delete()
 
-    except FloodWait as fw:
-        await asyncio.sleep(fw.value)
     except Exception as e:
-        await msg.edit(f"❌ Failed:\n<pre>{e}</pre>")
+        await msg.edit(f"❌ Error:\n<pre>{e}</pre>")
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
