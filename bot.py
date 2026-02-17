@@ -103,6 +103,38 @@ async def check_version(message: Message):
     me = await bot.get_me()
     await message.answer(f"Bot API Version Check\n\nBot ID: {me.id}\nUsername: @{me.username}")
 
+
+@dp.message(F.text == "/colortest")
+async def colortest(message: Message):
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🟢 SUCCESS",
+                    callback_data="s",
+                    button_style="success"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔵 PRIMARY",
+                    callback_data="p",
+                    button_style="primary"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔴 DELETE",
+                    callback_data="d",
+                    button_style="destructive"
+                )
+            ]
+        ]
+    )
+
+    await message.answer("Color Test:", reply_markup=kb)
+
 # ---------------- ABOUT CALLBACK ---------------- #
 
 @dp.callback_query(F.data == "about")
