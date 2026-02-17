@@ -1,132 +1,90 @@
-from aiohttp import web
-import asyncio, os, re
-from urllib.parse import urlparse
-import math
+import asyncio
 from datetime import datetime
-from bs4 import BeautifulSoup
-from PIL import Image
-from io import BytesIO
-import subprocess, sys
-import aiohttp
-import pyromod.listen
-from pyrogram import Client, filters
-from pyrogram.errors import FloodWait
-from time import time
-from pyrogram.enums import ParseMode
-from pyrogram.types import (
-    Message, CallbackQuery, InlineQueryResultArticle,
-    InputTextMessageContent, InlineKeyboardMarkup, InlineKeyboardButton
+from aiohttp import web
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    WebAppInfo
 )
+from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 
-# ---------------- CONFIG ---------------- #
-from config import *  
-from database import * 
+from config import *
 
 # ---------------- WEB SERVER ---------------- #
+
 routes = web.RouteTableDef()
 
-@routes.get("/", allow_head=True)
+@routes.get("/")
 async def root_handler(request):
     return web.json_response("Rohit")
 
-async def web_server():
-    web_app = web.Application(client_max_size=9000000000)
-    web_app.add_routes(routes)
-    return web_app
+async def start_web_server():
+    app = web.Application(client_max_size=9000000000)
+    app.add_routes(routes)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", PORT).start()
 
 # ---------------- BOT INIT ---------------- #
-class Bot(Client):
-    def __init__(self):
-        super().__init__(
-            name="nhentaiBot",
-            api_id=APP_ID,
-            api_hash=API_HASH,
-            bot_token=TG_BOT_TOKEN,
-            workers=TG_BOT_WORKERS
-        )
-        self.LOGGER = LOGGER
 
-    async def start(self):
-        await super().start()
-        me = await self.get_me()
-        self.set_parse_mode(ParseMode.HTML)
-        self.username = me.username
-        self.uptime = datetime.now()
-        self.LOGGER(__name__).info(f"Bot Running...! @{self.username}")
+bot = Bot(
+    token=TG_BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 
-        runner = web.AppRunner(await web_server())
-        await runner.setup()
-        await web.TCPSite(runner, "0.0.0.0", PORT).start()
+dp = Dispatcher()
 
-        try:
-            await self.send_message(OWNER_ID, "<b><blockquote>Bot restarted.</blockquote></b>")
-        except:
-            pass
+# ---------------- START HANDLER ---------------- #
 
-    async def stop(self):
-        await super().stop()
-        self.LOGGER(__name__).info("Bot stopped.")
+@dp.message(F.text == "/start")
+async def start_command(message: Message):
 
-    def run(self):
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(self.start())
-        try:
-            loop.run_forever()
-        except KeyboardInterrupt:
-            self.LOGGER(__name__).info("Interrupted.")
-        finally:
-            loop.run_until_complete(self.stop())
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔎 Search Manga",
+                    switch_inline_query_current_chat="",
+                    button_style="primary"  # 🔵 Blue
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Close",
+                    callback_data="close",
+                    button_style="destructive"  # 🔴 Red
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💻 Contact Developer",
+                    url="https://t.me/rohit_1888"
+                )
+            ]
+        ]
+    )
 
-app = Bot()
-
-# -------------- START HANDLER -------------- #
-@app.on_message(filters.command('start') & filters.private)
-async def start_command(_, message: Message):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Search Manga", switch_inline_query_current_chat="")],
-        [InlineKeyboardButton("💻 Contact Developer", url="https://t.me/rohit_1888")]
-    ])
-    await message.reply_photo(
+    await message.answer_photo(
         photo=START_PIC,
         caption=START_MSG.format(
             first=message.from_user.first_name,
             last=message.from_user.last_name,
-            username=('@' + message.from_user.username) if message.from_user.username else None,
-            mention=message.from_user.mention,
+            username=f"@{message.from_user.username}" if message.from_user.username else "None",
+            mention=message.from_user.mention_html(),
             id=message.from_user.id
         ),
         reply_markup=keyboard
     )
 
+# ---------------- MAIN ---------------- #
 
-# ---------------- UPDATE CMD ---------------- #
-@app.on_message(filters.command("update") & filters.user(OWNER_ID))
-async def update_bot(client, message):
-    msg = await message.reply_text("🔄 Pulling updates from GitHub...")
-    try:
-        pull = subprocess.run(["git", "pull"], capture_output=True, text=True)
-        if pull.returncode == 0:
-            await msg.edit(f"✅ Updated:\n<pre>{pull.stdout}</pre>")
-        else:
-            await msg.edit(f"❌ Git error:\n<pre>{pull.stderr}</pre>")
-            return
+async def main():
+    await start_web_server()
+    print("Bot running...")
+    await dp.start_polling(bot)
 
-        await asyncio.sleep(2)
-        await msg.edit("♻️ Rᴇsᴛᴀʀᴛɪɴɢ ʙᴏᴛ...")
-
-        # ✅ Delete after 5s
-        await asyncio.sleep(5)
-        try:
-            await msg.delete()
-        except:
-            pass
-
-        os.execl(sys.executable, sys.executable, *sys.argv)
-
-    except Exception as e:
-        await msg.edit(f"⚠️ Error: {e}")
-
-
-# ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
-    app.run()
+    asyncio.run(main())
