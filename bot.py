@@ -4,9 +4,9 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    WebAppInfo
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardRemove
 )
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -37,35 +37,23 @@ bot = Bot(
 
 dp = Dispatcher()
 
-# ---------------- START HANDLER ---------------- #
+# ---------------- MAIN MENU KEYBOARD ---------------- #
+
+def main_menu():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔎 Search Manga")],
+            [KeyboardButton(text="❌ Close")],
+            [KeyboardButton(text="💻 Contact Developer")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+# ---------------- START COMMAND ---------------- #
 
 @dp.message(F.text == "/start")
 async def start_command(message: Message):
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🔎 Search Manga",
-                    switch_inline_query_current_chat="",
-                    button_style="primary"  # 🔵 Blue
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="❌ Close",
-                    callback_data="close",
-                    button_style="destructive"  # 🔴 Red
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="💻 Contact Developer",
-                    url="https://t.me/rohit_1888"
-                )
-            ]
-        ]
-    )
 
     await message.answer_photo(
         photo=START_PIC,
@@ -76,7 +64,30 @@ async def start_command(message: Message):
             mention=message.from_user.mention_html(),
             id=message.from_user.id
         ),
-        reply_markup=keyboard
+        reply_markup=main_menu()
+    )
+
+# ---------------- BUTTON HANDLERS ---------------- #
+
+@dp.message(F.text == "🔎 Search Manga")
+async def search_manga(message: Message):
+    await message.answer(
+        "Send manga name to search 🔍",
+        reply_markup=main_menu()
+    )
+
+@dp.message(F.text == "💻 Contact Developer")
+async def contact_dev(message: Message):
+    await message.answer(
+        "Developer: https://t.me/rohit_1888",
+        reply_markup=main_menu()
+    )
+
+@dp.message(F.text == "❌ Close")
+async def close_menu(message: Message):
+    await message.answer(
+        "Menu Closed ❌",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 # ---------------- MAIN ---------------- #
