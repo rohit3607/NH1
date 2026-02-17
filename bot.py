@@ -98,6 +98,11 @@ Click the buttons below to continue.
         reply_markup=start_keyboard()
     )
 
+@dp.message(F.text == "/version")
+async def check_version(message: Message):
+    me = await bot.get_me()
+    await message.answer(f"Bot API Version Check\n\nBot ID: {me.id}\nUsername: @{me.username}")
+
 # ---------------- ABOUT CALLBACK ---------------- #
 
 @dp.callback_query(F.data == "about")
