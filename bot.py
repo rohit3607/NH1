@@ -2,18 +2,12 @@ from aiohttp import web
 import asyncio, os, re
 from urllib.parse import urlparse
 import math
-import tempfile
-import zipfile
-import shutil
-from tqdm.asyncio import tqdm
 from datetime import datetime
 from bs4 import BeautifulSoup
 from PIL import Image
 from io import BytesIO
 import subprocess, sys
 import aiohttp
-import json
-import cloudscraper
 import pyromod.listen
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
@@ -132,70 +126,6 @@ async def update_bot(client, message):
     except Exception as e:
         await msg.edit(f"⚠️ Error: {e}")
 
-
-BASE_DIR = "/"
-
-@app.on_message(filters.command("list") & filters.user(OWNER_ID))
-async def list_agent_fs(_, message: Message):
-    try:
-        files = sorted(os.listdir("/"))
-
-        text = "📁 <b>Agent Filesystem (/)</b>\n\n"
-
-        for f in files:
-            path = os.path.join("/", f)
-            if os.path.isdir(path):
-                text += f"📂 <code>{f}/</code>\n"
-            else:
-                try:
-                    size = os.path.getsize(path) // 1024
-                    text += f"📄 <code>{f}</code> ({size} KB)\n"
-                except:
-                    text += f"📄 <code>{f}</code>\n"
-
-        await message.reply_text(text)
-
-    except Exception as e:
-        await message.reply_text(f"❌ Error:\n<pre>{e}</pre>")
-
-@app.on_message(filters.command("get") & filters.user(OWNER_ID))
-async def get_agent_file(_, message: Message):
-    if len(message.command) < 2:
-        return await message.reply_text("❗ Usage:\n<code>/get path</code>\nExample: <code>/get /app</code>")
-
-    path = message.command[1]
-
-    if not os.path.exists(path):
-        return await message.reply_text("❌ Path not found")
-
-    msg = await message.reply_text("📦 Zipping agent files...")
-
-    import zipfile, tempfile
-
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
-            zip_path = tmp.name
-
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-            if os.path.isfile(path):
-                zipf.write(path, arcname=os.path.basename(path))
-            else:
-                for root, _, files in os.walk(path):
-                    for f in files:
-                        full = os.path.join(root, f)
-                        arc = full.lstrip("/")
-                        zipf.write(full, arc)
-
-        await message.reply_document(
-            zip_path,
-            caption=f"📦 Agent files: <code>{path}</code>"
-        )
-
-        os.remove(zip_path)
-        await msg.delete()
-
-    except Exception as e:
-        await msg.edit(f"❌ Error:\n<pre>{e}</pre>")
 
 # ---------------- RUN BOT ---------------- #
 if __name__ == "__main__":
