@@ -45,21 +45,21 @@ def start_keyboard():
                 InlineKeyboardButton(
                     text="📢 Channel",
                     url="https://t.me/yourchannel",
-                    button_style="primary"      # 🔵 Blue
+                    style="primary"      # 🔵 Blue
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="🫶 Donate At Your Will",
                     url="https://t.me/yourdonate",
-                    button_style="success"      # 🟢 Green
+                    style="success"      # 🟢 Green
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="ℹ️ About",
                     callback_data="about",
-                    button_style="secondary"    # ⚪ Gray
+                    style="danger"    # ⚪ Gray
                 )
             ]
         ]
@@ -72,7 +72,7 @@ def about_keyboard():
                 InlineKeyboardButton(
                     text="🔙 Back",
                     callback_data="back",
-                    button_style="destructive"  # 🔴 Red
+                    style="danger"  # 🔴 Red
                 )
             ]
         ]
