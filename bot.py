@@ -98,42 +98,46 @@ Click the buttons below to continue.
         reply_markup=start_keyboard()
     )
 
-@dp.message(F.text == "/version")
-async def check_version(message: Message):
-    me = await bot.get_me()
-    await message.answer(f"Bot API Version Check\n\nBot ID: {me.id}\nUsername: @{me.username}")
-
+import aiohttp
 
 @dp.message(F.text == "/colortest")
 async def colortest(message: Message):
 
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🟢 SUCCESS",
-                    callback_data="s",
-                    button_style="success"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🔵 PRIMARY",
-                    callback_data="p",
-                    button_style="primary"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🔴 DELETE",
-                    callback_data="d",
-                    button_style="destructive"
-                )
+    payload = {
+        "chat_id": message.chat.id,
+        "text": "🎨 Color Test Buttons",
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "🟢 SUCCESS",
+                        "callback_data": "s",
+                        "button_style": "success"
+                    }
+                ],
+                [
+                    {
+                        "text": "🔵 PRIMARY",
+                        "callback_data": "p",
+                        "button_style": "primary"
+                    }
+                ],
+                [
+                    {
+                        "text": "🔴 DELETE",
+                        "callback_data": "d",
+                        "button_style": "destructive"
+                    }
+                ]
             ]
-        ]
-    )
+        }
+    }
 
-    await message.answer("Color Test:", reply_markup=kb)
+    async with aiohttp.ClientSession() as session:
+        await session.post(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
+            json=payload
+        )
 
 # ---------------- ABOUT CALLBACK ---------------- #
 
