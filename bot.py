@@ -1,12 +1,11 @@
 import asyncio
-from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import (
     Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardRemove
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery
 )
 from aiogram.enums import ParseMode
 from aiogram.client.default import DefaultBotProperties
@@ -37,58 +36,83 @@ bot = Bot(
 
 dp = Dispatcher()
 
-# ---------------- MAIN MENU KEYBOARD ---------------- #
-
-def main_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🔎 Search Manga")],
-            [KeyboardButton(text="❌ Close")],
-            [KeyboardButton(text="💻 Contact Developer")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
-
-# ---------------- START COMMAND ---------------- #
+# ---------------- START HANDLER ---------------- #
 
 @dp.message(F.text == "/start")
 async def start_command(message: Message):
 
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📢 Channel",
+                    url="https://t.me/yourchannel"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🫶 Donate At Your Will",
+                    url="https://t.me/yourdonate"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="ℹ️ About",
+                    callback_data="about"
+                )
+            ]
+        ]
+    )
+
+    caption = f"""
+<b>Hey {message.from_user.first_name} 👋</b>
+
+I am a <b>Manga Downloader Bot</b> 📚  
+Search and download manga instantly ⚡
+
+Click the buttons below to continue.
+"""
+
     await message.answer_photo(
         photo=START_PIC,
-        caption=START_MSG.format(
-            first=message.from_user.first_name,
-            last=message.from_user.last_name,
-            username=f"@{message.from_user.username}" if message.from_user.username else "None",
-            mention=message.from_user.mention_html(),
-            id=message.from_user.id
-        ),
-        reply_markup=main_menu()
+        caption=caption,
+        reply_markup=keyboard
     )
 
-# ---------------- BUTTON HANDLERS ---------------- #
+# ---------------- ABOUT CALLBACK ---------------- #
 
-@dp.message(F.text == "🔎 Search Manga")
-async def search_manga(message: Message):
-    await message.answer(
-        "Send manga name to search 🔍",
-        reply_markup=main_menu()
+@dp.callback_query(F.data == "about")
+async def about_callback(call: CallbackQuery):
+
+    await call.answer()
+
+    await call.message.edit_caption(
+        caption="""
+<b>📌 About This Bot</b>
+
+• Fast Manga Search  
+• Instant Download  
+• Clean Interface  
+• Developed by <a href="https://t.me/rohit_1888">Rohit</a>
+""",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🔙 Back",
+                        callback_data="back"
+                    )
+                ]
+            ]
+        )
     )
 
-@dp.message(F.text == "💻 Contact Developer")
-async def contact_dev(message: Message):
-    await message.answer(
-        "Developer: https://t.me/rohit_1888",
-        reply_markup=main_menu()
-    )
+# ---------------- BACK BUTTON ---------------- #
 
-@dp.message(F.text == "❌ Close")
-async def close_menu(message: Message):
-    await message.answer(
-        "Menu Closed ❌",
-        reply_markup=ReplyKeyboardRemove()
-    )
+@dp.callback_query(F.data == "back")
+async def back_callback(call: CallbackQuery):
+    await call.answer()
+    await start_command(call.message)
 
 # ---------------- MAIN ---------------- #
 
