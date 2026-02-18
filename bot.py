@@ -83,14 +83,18 @@ def about_keyboard():
 
 # ---------------- START HANDLER ---------------- #
 
+
 @dp.message(F.text == "/start")
 async def start_command(message: Message):
 
     caption = f"""
-<b>Hey {message.from_user.first_name} 👋</b>
+<b>Hey {message.from_user.first_name} <tg-emoji emoji-id="5330459786234311729"></tg-emoji></b>
 
-I am a <b>Manga Downloader Bot</b> 📚  
-Search and download manga instantly ⚡
+I am a <b>Manga Downloader Bot</b> 
+<tg-emoji emoji-id="5258040062028822951"></tg-emoji>
+
+Search and download manga instantly 
+<tg-emoji emoji-id="5224257782013769471"></tg-emoji>
 
 Click the buttons below to continue.
 """
@@ -98,49 +102,9 @@ Click the buttons below to continue.
     await message.answer_photo(
         photo=START_PIC,
         caption=caption,
+        parse_mode=ParseMode.HTML,
         reply_markup=start_keyboard()
     )
-
-import aiohttp
-
-@dp.message(F.text == "/colortest")
-async def colortest(message: Message):
-
-    payload = {
-        "chat_id": message.chat.id,
-        "text": "🎨 Color Test Buttons",
-        "reply_markup": {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "🟢 SUCCESS",
-                        "callback_data": "s",
-                        "button_style": "success"
-                    }
-                ],
-                [
-                    {
-                        "text": "🔵 PRIMARY",
-                        "callback_data": "p",
-                        "button_style": "primary"
-                    }
-                ],
-                [
-                    {
-                        "text": "🔴 DELETE",
-                        "callback_data": "d",
-                        "button_style": "destructive"
-                    }
-                ]
-            ]
-        }
-    }
-
-    async with aiohttp.ClientSession() as session:
-        await session.post(
-            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage",
-            json=payload
-        )
 
 # ---------------- ABOUT CALLBACK ---------------- #
 
