@@ -53,14 +53,16 @@ def start_keyboard():
                 InlineKeyboardButton(
                     text="🫶 Donate At Your Will",
                     url="https://t.me/yourdonate",
-                    style="success"      # 🟢 Green
+                    style="success",
+                    icon_custom_emoji_id="5258040062028822951"
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="ℹ️ About",
                     callback_data="about",
-                    style="danger"    # ⚪ Gray
+                    style="danger",
+                    icon_custom_emoji_id="5330459786234311729"
                 )
             ]
         ]
