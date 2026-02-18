@@ -45,7 +45,8 @@ def start_keyboard():
                 InlineKeyboardButton(
                     text="📢 Channel",
                     url="https://t.me/yourchannel",
-                    style="primary"      # 🔵 Blue
+                    style="primary",
+                    icon_custom_emoji_id="5224257782013769471"
                 )
             ],
             [
