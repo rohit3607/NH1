@@ -5,9 +5,10 @@ from aiogram.types import (
     Message,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    CallbackQuery
+    CallbackQuery,
+    MessageEntity
 )
-from aiogram.enums import ParseMode
+from aiogram.enums import ParseMode, MessageEntityType
 from aiogram.client.default import DefaultBotProperties
 
 from config import *
@@ -87,22 +88,40 @@ def about_keyboard():
 @dp.message(F.text == "/start")
 async def start_command(message: Message):
 
-    caption = f"""
-<b>Hey {message.from_user.first_name} <tg-emoji emoji-id="5330459786234311729"></tg-emoji></b>
+    text = f"""Hey {message.from_user.first_name} 
 
-I am a <b>Manga Downloader Bot</b> 
-<tg-emoji emoji-id="5258040062028822951"></tg-emoji>
+I am a Manga Downloader Bot
 
-Search and download manga instantly 
-<tg-emoji emoji-id="5224257782013769471"></tg-emoji>
+Search and download manga instantly
 
 Click the buttons below to continue.
 """
 
+    entities = [
+        MessageEntity(
+            type=MessageEntityType.CUSTOM_EMOJI,
+            offset=text.find(message.from_user.first_name) + len(message.from_user.first_name) + 1,
+            length=1,
+            custom_emoji_id="5330459786234311729"
+        ),
+        MessageEntity(
+            type=MessageEntityType.CUSTOM_EMOJI,
+            offset=text.find("Bot") + 4,
+            length=1,
+            custom_emoji_id="5258040062028822951"
+        ),
+        MessageEntity(
+            type=MessageEntityType.CUSTOM_EMOJI,
+            offset=text.find("instantly") + 9,
+            length=1,
+            custom_emoji_id="5224257782013769471"
+        ),
+    ]
+
     await message.answer_photo(
         photo=START_PIC,
-        caption=caption,
-        parse_mode=ParseMode.HTML,
+        caption=text,
+        caption_entities=entities,
         reply_markup=start_keyboard()
     )
 
