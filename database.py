@@ -14,6 +14,7 @@ class Rohit:
         self.header_data = self.database['header']
         self.footer_data = self.database['footer']
         self.bot_data = self.database['bot']
+        self.settings_data = self.database['settings']
 
     # Set Header
     async def set_header(self, user_id: int, header_text: str):
@@ -111,5 +112,30 @@ class Rohit:
             logging.error(f"Error deleting footer for user {user_id}: {e}")
             return False
 
+    # Set Start Config
+    async def set_start_config(self, start_pic: str, start_msg: str, start_buttons: list):
+        try:
+            await self.settings_data.update_one(
+                {"_id": "global"},
+                {
+                    "$set": {
+                        "start_pic": start_pic,
+                        "start_msg": start_msg,
+                        "start_buttons": start_buttons
+                    }
+                },
+                upsert=True
+            )
+            return True
+        except Exception as e:
+            logging.error(f"Error setting start config: {e}")
+            return False
+
+    # Get Start Config
+    async def get_start_config(self):
+        data = await self.settings_data.find_one({"_id": "global"})
+        if data:
+            return data.get("start_pic"), data.get("start_msg"), data.get("start_buttons")
+        return None, None, None
 
 db = Rohit(DB_URI, DB_NAME)

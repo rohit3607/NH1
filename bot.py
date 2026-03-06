@@ -88,21 +88,173 @@ app = Bot()
 # -------------- START HANDLER -------------- #
 @app.on_message(filters.command('start') & filters.private)
 async def start_command(_, message: Message):
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔎 Search Manga", switch_inline_query_current_chat="")],
-        [InlineKeyboardButton("💻 Contact Developer", url="https://t.me/rohit_1888")]
-    ])
+    db_pic, db_msg, db_buttons = await db.get_start_config()
+    start_text = db_msg if db_msg else START_MSG
+    start_photo = db_pic if db_pic else START_PIC
+
+    if db_buttons is not None:
+        if db_buttons:
+            keyboard_buttons = []
+            for row in db_buttons:
+                btn_row = []
+                for btn in row:
+                    if 'url' in btn:
+                        btn_row.append(InlineKeyboardButton(text=btn['text'], url=btn['url']))
+                    elif 'switch_inline_query_current_chat' in btn:
+                        btn_row.append(InlineKeyboardButton(text=btn['text'], switch_inline_query_current_chat=btn['switch_inline_query_current_chat']))
+                    elif 'callback_data' in btn:
+                        btn_row.append(InlineKeyboardButton(text=btn['text'], callback_data=btn['callback_data']))
+                if btn_row:
+                    keyboard_buttons.append(btn_row)
+            keyboard = InlineKeyboardMarkup(keyboard_buttons)
+        else:
+            keyboard = None
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔎 Search Manga", switch_inline_query_current_chat="")],
+            [InlineKeyboardButton("💻 Contact Developer", url="https://t.me/rohit_1888")]
+        ])
+
+    safe_kwargs = {
+        "first": message.from_user.first_name or "",
+        "last": message.from_user.last_name or "",
+        "username": ('@' + message.from_user.username) if message.from_user.username else "",
+        "mention": message.from_user.mention,
+        "id": message.from_user.id
+    }
+    
+    try:
+        caption_text = start_text.format(**safe_kwargs)
+    except Exception:
+        caption_text = start_text
+
     await message.reply_photo(
-        photo=START_PIC,
-        caption=START_MSG.format(
-            first=message.from_user.first_name,
-            last=message.from_user.last_name,
-            username=('@' + message.from_user.username) if message.from_user.username else None,
-            mention=message.from_user.mention,
-            id=message.from_user.id
-        ),
+        photo=start_photo,
+        caption=caption_text,
         reply_markup=keyboard
     )
+
+# ---------------- SETTINGS CMD ---------------- #
+@app.on_message(filters.command("settings") & filters.user(OWNER_ID) & filters.private)
+async def settings_command(client: Bot, message: Message):
+    db_pic, db_msg, db_buttons = await db.get_start_config()
+    current_pic = db_pic if db_pic else START_PIC
+    current_msg = db_msg if db_msg else START_MSG
+    
+    # 1. Ask for Start Picture
+    ask_pic_text = (
+        "<b>⚙️ Configure Start Picture</b>\n\n"
+        "Send the new start picture URL or telegram file ID.\n\n"
+        "<b>Current Picture:</b>\n"
+        f"<code>{current_pic}</code>\n\n"
+        "<i>Send /skip to keep current picture, /cancel to abort.</i>"
+    )
+    
+    try:
+        response_pic = await client.ask(chat_id=message.chat.id, text=ask_pic_text, timeout=300)
+    except asyncio.TimeoutError:
+        return await message.reply_text("⏱️ Timeout! Settings cancelled.")
+        
+    if response_pic.text and response_pic.text.lower() == "/cancel":
+        return await message.reply_text("❌ Cancelled.")
+    elif response_pic.text and response_pic.text.lower() == "/skip":
+        new_pic = current_pic
+    else:
+        if response_pic.photo:
+            new_pic = response_pic.photo.file_id
+        elif response_pic.text:
+            new_pic = response_pic.text
+        else:
+            new_pic = current_pic
+    
+    # 2. Ask for Start Message
+    ask_msg_text = (
+        "<b>⚙️ Configure Start Message</b>\n\n"
+        "Send the new start message text. Variables:\n"
+        "<code>{first}</code>, <code>{last}</code>, <code>{username}</code>, <code>{mention}</code>, <code>{id}</code>\n\n"
+        "<b>Current Message:</b>\n"
+        f"{current_msg}\n\n"
+        "<i>Send /skip to keep current message, /cancel to abort.</i>"
+    )
+    
+    try:
+        response1 = await client.ask(chat_id=message.chat.id, text=ask_msg_text, timeout=300)
+    except asyncio.TimeoutError:
+        return await message.reply_text("⏱️ Timeout! Settings cancelled.")
+        
+    if response1.text and response1.text.lower() == "/cancel":
+        return await message.reply_text("❌ Cancelled.")
+    elif response1.text and response1.text.lower() == "/skip":
+        new_msg = current_msg
+    else:
+        new_msg = response1.text if response1.text else current_msg
+        
+    # 3. Ask for Buttons
+    current_buttons_text = ""
+    if db_buttons is not None:
+        for row in db_buttons:
+            row_txt = []
+            for btn in row:
+                if 'url' in btn:
+                    row_txt.append(f"{btn['text']} - {btn['url']}")
+                elif 'switch_inline_query_current_chat' in btn:
+                    row_txt.append(f"{btn['text']} - inline:{btn['switch_inline_query_current_chat']}")
+                elif 'callback_data' in btn:
+                    row_txt.append(f"{btn['text']} - callback:{btn['callback_data']}")
+            current_buttons_text += " | ".join(row_txt) + "\n"
+    else:
+        current_buttons_text = "🔎 Search Manga - inline:\n💻 Contact Developer - https://t.me/rohit_1888\n"
+
+    ask_btn_text = (
+        "<b>⚙️ Configure Reply Markup Buttons</b>\n\n"
+        "Send the buttons in the format: <code>Button Name - url</code>\n"
+        "<code>Btn 1 - http://link.com | Btn 2 - inline:</code>\n"
+        "<i>Support: url, inline:query, callback:data. Use <code>|</code> to separate buttons on same row.</i>\n\n"
+        "<b>Current Buttons:</b>\n"
+        f"<code>{current_buttons_text}</code>\n"
+        "<i>Send /skip to keep current buttons, /cancel to abort, /none to remove all.</i>"
+    )
+    
+    try:
+        response2 = await client.ask(chat_id=message.chat.id, text=ask_btn_text, timeout=300)
+    except asyncio.TimeoutError:
+        return await message.reply_text("⏱️ Timeout! Settings cancelled.")
+        
+    if response2.text and response2.text.lower() == "/cancel":
+        return await message.reply_text("❌ Cancelled.")
+    elif response2.text and response2.text.lower() == "/skip":
+        new_buttons = db_buttons # can be None, handled in DB
+    elif response2.text and response2.text.lower() == "/none":
+        new_buttons = []
+    else:
+        new_buttons = []
+        if response2.text:
+            lines = response2.text.strip().split('\n')
+            for line in lines:
+                if not line.strip(): continue
+                row_btns = line.split('|')
+                row = []
+                for b in row_btns:
+                    if '-' not in b: continue
+                    parts = b.split('-', 1)
+                    t = parts[0].strip()
+                    v = parts[1].strip()
+                    if v.startswith("inline:"):
+                        row.append({"text": t, "switch_inline_query_current_chat": v[7:].strip()})
+                    elif v.startswith("callback:"):
+                        row.append({"text": t, "callback_data": v[9:].strip()})
+                    else:
+                        if not (v.startswith("http://") or v.startswith("https://") or v.startswith("t.me/")):
+                            v = "https://" + v
+                        row.append({"text": t, "url": v})
+                if row:
+                    new_buttons.append(row)
+                
+    success = await db.set_start_config(new_pic, new_msg, new_buttons)
+    if success:
+        await message.reply_text("✅ <b>Settings saved successfully!</b>")
+    else:
+        await message.reply_text("❌ <b>Failed to save settings. Check logs.</b>")
 
 
 # ---------------- UPDATE CMD ---------------- #
