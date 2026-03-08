@@ -32,7 +32,7 @@ MAX_LIST_ITEMS = 100
 START_MSG = os.environ.get("START_MESSAGE", "<b>ʜᴇʟʟᴏ {mention}\n\n<blockquote> ɪ ᴀᴍ ʜ-ᴍᴀɴɢᴀ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ.</blockquote></b>")
 
 #--------------------------------------------
-LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1002805198226")) # STORE EVERY DOWNLOAD FILE
+CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1003784675910")) # STORE EVERY DOWNLOAD FILE
 
 #--------------------------------------------
 
