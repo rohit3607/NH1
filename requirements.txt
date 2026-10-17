@@ -28,3 +28,10 @@ opencv-python-headless
 numpy
 pytesseract
 deep-translator
+reportlab
+playwright
+beautifulsoup4
+cloudscraper
+undetected-chromedriver
+selenium
+
