@@ -107,11 +107,11 @@ async def start_command(_, message: Message):
     )
 
 # -------------- URL HANDLER -------------- #
-@app.on_message(filters.regex(r"https?://(nhentai\.(net|to|xxx)|hentaifox\.com)/(g|gallery)/(\d+)/?") & filters.private)
+@app.on_message(filters.regex(r"https?://(nhentai\.(?:net|to|xxx)|hentaifox\.com)/(?:g|gallery)/(\d+)") & filters.private)
 async def handle_url(client: Client, message: Message):
     site_domain = message.matches[0].group(1)
     site = "fox" if "hentaifox" in site_domain else site_domain.split(".")[-1]
-    code = message.matches[0].group(4)
+    code = message.matches[0].group(2)
     
     await message.reply(
         f"**Detected Link:** `{code}` from `{site_domain}`\n\nClick below to download as PDF.",
@@ -119,6 +119,7 @@ async def handle_url(client: Client, message: Message):
             [InlineKeyboardButton("📥 Download PDF", callback_data=f"download_{site}_{code}")]
         ])
     )
+
 
 # -------------- INLINE SEARCH -------------- #
 @app.on_inline_query()
@@ -249,13 +250,15 @@ async def search_nhentai(query=None, page=1, site="net"):
 async def download_image(session, url, path):
     for _ in range(3):
         try:
-            async with session.get(url, timeout=30) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15, connect=5)) as resp:
                 if resp.status == 200:
-                    with open(path, "wb") as f:
-                        f.write(await resp.read())
-                    return True
+                    content = await resp.read()
+                    if content:
+                        with open(path, "wb") as f:
+                            f.write(content)
+                        return True
         except:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
     return False
 
 # -------------- PDF GENERATOR -------------- #
@@ -280,6 +283,8 @@ async def download_manga_as_pdf(code, site="net", progress_callback=None):
     api_success = False
     media_id = None
     images = []
+    soup = None
+
     if site == "net":
         try:
             api_resp = scraper.get(f"https://nhentai.net/api/v2/galleries/{code}", headers=headers, timeout=10)
@@ -297,10 +302,11 @@ async def download_manga_as_pdf(code, site="net", progress_callback=None):
                 api_success = True
         except Exception as e:
             print(f"API v2 error: {e}")
+
     if not api_success:
         # Fallback to HTML scraping
         try:
-            resp = scraper.get(gallery_url, headers=headers, timeout=10)
+            resp = scraper.get(gallery_url, headers=headers, timeout=15)
             if resp.status_code != 200:
                 raise Exception(f"Gallery not found on {domain} ({resp.status_code})")
             html = resp.text
@@ -308,203 +314,257 @@ async def download_manga_as_pdf(code, site="net", progress_callback=None):
             raise Exception(f"Connection Error on {domain}: {e}")
         soup = BeautifulSoup(html, "html.parser")
 
-    
-    if not api_success:
-        # -------- EXTRACT METADATA -------- #
-        media_id = None
-        images = []
-        # 1. Try modern nhentai embedded script JSON
-        for s in soup.find_all("script"):
-            txt = ''.join(s.find_all(string=True))
-            if 'media_id' in txt:
-                try:
-                    data = json.loads(txt)
-                    body = json.loads(data['body']) if (isinstance(data, dict) and 'body' in data and isinstance(data['body'], str)) else data
-                    if isinstance(body, dict) and 'media_id' in body:
-                        media_id = str(body['media_id'])
-                        # Check body['pages']
-                        if 'pages' in body and isinstance(body['pages'], list):
-                            for p in body['pages']:
-                                if isinstance(p, dict) and 'path' in p:
-                                    images.append(p['path'].split('.')[-1])
-                                elif isinstance(p, dict) and 't' in p:
-                                    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-                                    images.append(ext_map.get(p["t"], "jpg"))
-                        elif 'images' in body and isinstance(body['images'], dict) and 'pages' in body['images']:
-                            for img in body['images']['pages']:
-                                ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-                                images.append(ext_map.get(img["t"], "jpg"))
-                        if media_id and images:
-                            break
-                except Exception:
-                    pass
-    else:
-        # API already provided media_id and images
-        pass
-
-    # 2. Try legacy JSON extraction (window._gallery = JSON.parse("..."))
-    if not media_id or not images:
-        json_match = re.search(r'window\._gallery\s*=\s*JSON\.parse\("(.*?)"\);', html)
-        if json_match:
+        # 1. Try N.gallery ({...}) used by nhentai.to
+        n_match = re.search(r'var\s+gallery\s*=\s*new\s+N\.gallery\(({.*?})\);', html, re.DOTALL)
+        if n_match:
             try:
-                raw_json = json_match.group(1).encode('utf-8').decode('unicode_escape')
-                gallery_data = json.loads(raw_json)
-                media_id = str(gallery_data.get("media_id"))
-                for img in gallery_data.get("images", {}).get("pages", []):
-                    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-                    images.append(ext_map.get(img["t"], "jpg"))
+                cleaned = re.sub(r',\s*([}\]])', r'\1', n_match.group(1))
+                data = json.loads(cleaned)
+                if 'media_id' in data:
+                    media_id = str(data['media_id'])
+                pages = data.get('images', {}).get('pages', {})
+                ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
+                if isinstance(pages, dict):
+                    sorted_keys = sorted(pages.keys(), key=lambda k: int(k) if str(k).isdigit() else 0)
+                    for k in sorted_keys:
+                        p = pages[k]
+                        images.append(ext_map.get(p.get("t"), "jpg") if isinstance(p, dict) else "jpg")
+                elif isinstance(pages, list):
+                    for p in pages:
+                        if isinstance(p, dict):
+                            images.append(ext_map.get(p.get("t"), "jpg"))
             except Exception as e:
-                print(f"JSON Parse Error: {e}")
+                print(f"N.gallery parse error: {e}")
 
-    # 3. Try legacy simple JSON extraction (window._gallery = {...})
-    if not media_id or not images:
-        json_match = re.search(r'window\._gallery\s*=\s*({.*?});', html, re.S)
-        if json_match:
-            try:
-                gallery_data = json.loads(json_match.group(1))
-                media_id = str(gallery_data.get("media_id"))
-                for img in gallery_data.get("images", {}).get("pages", []):
+        # 2. Try modern nhentai embedded script JSON
+        if not media_id or not images:
+            for s in soup.find_all("script"):
+                txt = ''.join(s.find_all(string=True))
+                if 'media_id' in txt:
+                    try:
+                        data = json.loads(txt)
+                        body = json.loads(data['body']) if (isinstance(data, dict) and 'body' in data and isinstance(data['body'], str)) else data
+                        if isinstance(body, dict) and 'media_id' in body:
+                            media_id = str(body['media_id'])
+                            pages = body.get('pages') or body.get('images', {}).get('pages', [])
+                            ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
+                            if isinstance(pages, dict):
+                                sorted_keys = sorted(pages.keys(), key=lambda k: int(k) if str(k).isdigit() else 0)
+                                for k in sorted_keys:
+                                    p = pages[k]
+                                    images.append(ext_map.get(p.get("t"), "jpg") if isinstance(p, dict) else "jpg")
+                            elif isinstance(pages, list):
+                                for p in pages:
+                                    if isinstance(p, dict) and 'path' in p:
+                                        images.append(p['path'].split('.')[-1])
+                                    elif isinstance(p, dict) and 't' in p:
+                                        images.append(ext_map.get(p["t"], "jpg"))
+                            if media_id and images:
+                                break
+                    except Exception:
+                        pass
+
+        # 3. Try legacy JSON extraction (window._gallery = JSON.parse("..."))
+        if not media_id or not images:
+            json_match = re.search(r'window\._gallery\s*=\s*JSON\.parse\("(.*?)"\);', html)
+            if json_match:
+                try:
+                    raw_json = json_match.group(1).encode('utf-8').decode('unicode_escape')
+                    gallery_data = json.loads(raw_json)
+                    media_id = str(gallery_data.get("media_id"))
+                    pages = gallery_data.get("images", {}).get("pages", [])
                     ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
-                    images.append(ext_map.get(img["t"], "jpg"))
-            except:
-                pass
+                    if isinstance(pages, list):
+                        for img in pages:
+                            images.append(ext_map.get(img.get("t"), "jpg"))
+                    elif isinstance(pages, dict):
+                        for k in sorted(pages.keys(), key=lambda k: int(k) if str(k).isdigit() else 0):
+                            images.append(ext_map.get(pages[k].get("t"), "jpg"))
+                except Exception as e:
+                    print(f"JSON Parse Error: {e}")
 
-    # 4. Fallback: Scrape from page structure (for nhentai.to and others)
-    img_domain_override = None
-    if not media_id or not images:
-        # Priority 1: Check cover image or first thumbnail (most reliable for MediaID)
-        cover_img = soup.select_one("#cover img, .cover img, .gallery_cover img, .gallery_top img, .gallerythumb img, .thumb-container img")
-        if cover_img:
-            src = cover_img.get("data-src") or cover_img.get("src") or ""
-            # Standard MediaID pattern
-            match = re.search(r'/galleries/(\d+)/', src)
-            if match:
-                media_id = match.group(1)
-            else:
-                # Mirror pattern (e.g. nhentai.xxx or hentaifox.com)
-                match = re.search(r'nhentaimg\.com/(\d+/[a-zA-Z0-9]+)', src) or re.search(r'hentaifox\.com/(\d+/\d+)', src)
+        # 4. Try legacy simple JSON extraction (window._gallery = {...})
+        if not media_id or not images:
+            json_match = re.search(r'window\._gallery\s*=\s*({.*?});', html, re.S)
+            if json_match:
+                try:
+                    cleaned = re.sub(r',\s*([}\]])', r'\1', json_match.group(1))
+                    gallery_data = json.loads(cleaned)
+                    media_id = str(gallery_data.get("media_id"))
+                    pages = gallery_data.get("images", {}).get("pages", [])
+                    ext_map = {"j": "jpg", "p": "png", "g": "gif", "w": "webp"}
+                    if isinstance(pages, list):
+                        for img in pages:
+                            images.append(ext_map.get(img.get("t"), "jpg"))
+                    elif isinstance(pages, dict):
+                        for k in sorted(pages.keys(), key=lambda k: int(k) if str(k).isdigit() else 0):
+                            images.append(ext_map.get(pages[k].get("t"), "jpg"))
+                except:
+                    pass
+
+        # 5. Fallback: Scrape from page structure
+        if not media_id or not images:
+            cover_img = soup.select_one("#cover img, .cover img, .gallery_cover img, .gallery_top img, .gallerythumb img, .thumb-container img")
+            if cover_img:
+                src = cover_img.get("data-src") or cover_img.get("src") or ""
+                match = re.search(r'/galleries/(\d+)/', src)
                 if match:
                     media_id = match.group(1)
-                    img_domain_override = re.search(r'(https?://[^/]+)', src).group(1)
-        
-        # Priority 2: Find media_id from ANY gallery link/img if cover failed
-        if not media_id:
-            for attr in ["src", "data-src", "href"]:
-                tags = soup.find_all(lambda t: t.has_attr(attr) and ("/galleries/" in t[attr] or "nhentaimg.com" in t[attr] or "hentaifox.com" in t[attr]))
-                for tag in tags:
-                    val = tag[attr]
-                    match = re.search(r'/galleries/(\d+)/', val)
-                    if not match:
-                        match = re.search(r'nhentaimg\.com/(\d+/[a-zA-Z0-9]+)', val) or re.search(r'hentaifox\.com/(\d+/\d+)', val)
-                        if match:
-                            img_domain_override = re.search(r'(https?://[^/]+)', val).group(1)
-                    
+                else:
+                    match = re.search(r'nhentaimg\.com/(\d+/[a-zA-Z0-9]+)', src) or re.search(r'hentaifox\.com/(\d+/\d+)', src)
                     if match:
                         media_id = match.group(1)
+
+            if not media_id:
+                for attr in ["src", "data-src", "href"]:
+                    tags = soup.find_all(lambda t: t.has_attr(attr) and ("/galleries/" in t[attr] or "nhentaimg.com" in t[attr] or "hentaifox.com" in t[attr]))
+                    for tag in tags:
+                        val = tag[attr]
+                        match = re.search(r'/galleries/(\d+)/', val)
+                        if not match:
+                            match = re.search(r'nhentaimg\.com/(\d+/[a-zA-Z0-9]+)', val) or re.search(r'hentaifox\.com/(\d+/\d+)', val)
+                        if match:
+                            media_id = match.group(1)
+                            break
+                    if media_id:
                         break
-                if media_id: break
-        
-        # Count pages from total pages text (e.g. "Pages: 25" or "25 pages")
-        stats = soup.select_one("#tags, .tag-container, #info, .info, .gallery_right, span.pages")
-        total_pages = None
-        if stats:
-            pages_text = re.search(r'Pages:\s*(\d+)', stats.text, re.I) or re.search(r'(\d+)\s+pages', stats.text, re.I)
-            if pages_text:
-                total_pages = int(pages_text.group(1))
 
-        if not total_pages:
-            pages_el = soup.select_one('.tag_name.pages, span.pages')
-            if pages_el and pages_el.text.strip().isdigit():
-                total_pages = int(pages_el.text.strip())
+            stats = soup.select_one("#tags, .tag-container, #info, .info, .gallery_right, span.pages")
+            total_pages = None
+            if stats:
+                pages_text = re.search(r'Pages:\s*(\d+)', stats.text, re.I) or re.search(r'(\d+)\s+pages', stats.text, re.I)
+                if pages_text:
+                    total_pages = int(pages_text.group(1))
 
-        if total_pages:
-            # Fallback extensions: detect from thumbnails
-            detected_ext = "jpg"
-            thumbs = soup.select(".gallerythumb img, .thumb-container img, .gt_th img")
-            for thumb in thumbs[:10]:
-                src = thumb.get("data-src") or thumb.get("src") or ""
-                if ".webp" in src:
-                    detected_ext = "webp"
-                    break
-                elif ".png" in src:
-                    detected_ext = "png"
-                    break
-            images = [detected_ext] * total_pages
-        else:
-            # Last resort: count thumbnails without duplicating nested elements
-            thumbs = soup.select(".thumb-container") or soup.select(".gallerythumb") or soup.select(".gt_th")
-            if thumbs:
-                total_pages = len(thumbs)
-                images = ["jpg"] * total_pages
+            if not total_pages:
+                pages_el = soup.select_one('.tag_name.pages, span.pages')
+                if pages_el and pages_el.text.strip().isdigit():
+                    total_pages = int(pages_el.text.strip())
+
+            if total_pages:
+                detected_ext = "jpg"
+                thumbs = soup.select(".gallerythumb img, .thumb-container img, .gt_th img")
+                for thumb in thumbs[:10]:
+                    src = thumb.get("data-src") or thumb.get("src") or ""
+                    if ".webp" in src:
+                        detected_ext = "webp"
+                        break
+                    elif ".png" in src:
+                        detected_ext = "png"
+                        break
+                images = [detected_ext] * total_pages
+            else:
+                thumbs = soup.select(".thumb-container") or soup.select(".gallerythumb") or soup.select(".gt_th")
+                if thumbs:
+                    total_pages = len(thumbs)
+                    images = ["jpg"] * total_pages
 
     if not media_id:
-        # Last ditch effort for media_id from HTML source
-        match = re.search(r'/galleries/(\d+)/', html)
-        if not match:
+        match = re.search(r'/galleries/(\d+)/', html if not api_success else "")
+        if not match and not api_success:
             match = re.search(r'nhentaimg\.com/(\d+/[a-zA-Z0-9]+)', html) or re.search(r'hentaifox\.com/(\d+/\d+)', html)
-        if match: media_id = match.group(1)
+        if match:
+            media_id = match.group(1)
 
     if not media_id or not images:
         raise Exception(f"Could not extract gallery metadata from {domain}. MediaID: {media_id}, Pages: {len(images)}")
 
-    # -------- IMAGE SERVERS -------- #
+    # -------- DYNAMIC CDN RESOLUTION -------- #
+    detected_cdn_host = None
+    if soup:
+        for img in soup.select('#cover img, .thumb-container img, .gallerythumb img, img'):
+            srcs = [img.get('src') or '', img.get('data-src') or '']
+            if img.has_attr('data-fallbacks'):
+                srcs.extend(re.findall(r'https?://[^\s",\\]+', img['data-fallbacks']))
+            for s in srcs:
+                match = re.search(r'(https?://[^/]+)/galleries/', s)
+                if match:
+                    detected_cdn_host = match.group(1)
+                    break
+            if detected_cdn_host:
+                break
+
     img_domains = {
         "net": "i.nhentai.net",
-        "to": "zrocdn.xyz",
+        "to": "supercdn.site",
         "xxx": "i5.nhentaimg.com",
         "fox": "i3.hentaifox.com"
     }
-    img_domain = img_domains.get(site, "i.nhentai.net")
+    default_domain = img_domains.get(site, "supercdn.site" if site == "to" else "i.nhentai.net")
+
+    candidate_domains = []
+    if detected_cdn_host:
+        host_domain = detected_cdn_host.replace("https://", "").replace("http://", "").strip("/")
+        if host_domain:
+            candidate_domains.append(host_domain)
+    if default_domain not in candidate_domains:
+        candidate_domains.append(default_domain)
+
+    if site == "to":
+        for fb in ["supercdn.site", "i.nhentai.net", "i3.nhentai.net"]:
+            if fb not in candidate_domains:
+                candidate_domains.append(fb)
+    elif site == "net":
+        for fb in ["i.nhentai.net", "i3.nhentai.net", "i5.nhentai.net", "supercdn.site"]:
+            if fb not in candidate_domains:
+                candidate_domains.append(fb)
+    elif site == "xxx":
+        for fb in ["i5.nhentaimg.com", "i3.nhentaimg.com"]:
+            if fb not in candidate_domains:
+                candidate_domains.append(fb)
+    elif site == "fox":
+        for fb in ["i3.hentaifox.com", "i.hentaifox.com"]:
+            if fb not in candidate_domains:
+                candidate_domains.append(fb)
 
     folder = f"{site}_{code}"
     os.makedirs(folder, exist_ok=True)
-    
     total_pages = len(images)
-    
+
     # -------- DOWNLOAD IMAGES -------- #
+    real_ext = images[0] if images else "jpg"
+    test_pg = 1
+    working_domain = candidate_domains[0]
+    working_ext = real_ext
+    found_working = False
+
     async with aiohttp.ClientSession(headers=headers) as session:
-        # Auto-detect real extension (mirrors like .xxx often use webp instead of jpg)
-        real_ext = images[0]
-        test_pg = 1
-        for ext_test in [real_ext, "webp", "jpg", "png"]:
-            if img_domain_override:
-                test_url = f"{img_domain_override}/{media_id}/{test_pg}.{ext_test}"
-            elif site == "xxx":
-                test_url = f"https://i5.nhentaimg.com/{media_id}/{test_pg}.{ext_test}"
-            elif site == "fox":
-                test_url = f"https://i3.hentaifox.com/{media_id}/{test_pg}.{ext_test}"
-            else:
-                test_url = f"https://{img_domain}/galleries/{media_id}/{test_pg}.{ext_test}"
-            
-            try:
-                async with session.get(test_url, timeout=10) as resp:
-                    if resp.status == 200:
-                        real_ext = ext_test
-                        break
-            except: continue
+        for c_domain in candidate_domains:
+            for ext_test in [real_ext, "webp", "jpg", "png"]:
+                if site in ["xxx", "fox"]:
+                    test_url = f"https://{c_domain}/{media_id}/{test_pg}.{ext_test}"
+                else:
+                    test_url = f"https://{c_domain}/galleries/{media_id}/{test_pg}.{ext_test}"
 
-        if real_ext and images and real_ext != images[0]:
-            images = [real_ext] * total_pages
+                try:
+                    async with session.get(test_url, timeout=aiohttp.ClientTimeout(total=5, connect=3)) as resp:
+                        if resp.status == 200:
+                            working_domain = c_domain
+                            working_ext = ext_test
+                            found_working = True
+                            break
+                except:
+                    continue
+            if found_working:
+                break
 
-        for i in range(0, total_pages, 10): # Batch of 10
+        if working_ext and images and working_ext != images[0]:
+            images = [working_ext] * total_pages
+
+        for i in range(0, total_pages, 10):  # Batch of 10
             batch_tasks = []
             for j in range(i, min(i + 10, total_pages)):
-                ext = images[j] if j < len(images) else real_ext
+                ext = images[j] if j < len(images) else working_ext
                 pg = j + 1
-                
-                # Dynamic URL building
-                if img_domain_override:
-                    img_url = f"{img_domain_override}/{media_id}/{pg}.{ext}"
-                elif site == "xxx":
-                    img_url = f"https://i5.nhentaimg.com/{media_id}/{pg}.{ext}"
-                elif site == "fox":
-                    img_url = f"https://i3.hentaifox.com/{media_id}/{pg}.{ext}"
+
+                if site in ["xxx", "fox"]:
+                    img_url = f"https://{working_domain}/{media_id}/{pg}.{ext}"
                 else:
-                    img_url = f"https://{img_domain}/galleries/{media_id}/{pg}.{ext}"
-                
+                    img_url = f"https://{working_domain}/galleries/{media_id}/{pg}.{ext}"
+
                 img_path = os.path.join(folder, f"{pg:03d}.{ext}")
                 batch_tasks.append(download_image(session, img_url, img_path))
-            
+
             await asyncio.gather(*batch_tasks)
             if progress_callback:
                 await progress_callback(min(i + 10, total_pages), total_pages)
@@ -525,20 +585,16 @@ async def download_manga_as_pdf(code, site="net", progress_callback=None):
 
     for img_path in image_files:
         try:
-            # Try to open image with fitz directly (works for JPG, PNG)
             try:
                 img_doc = fitz.open(img_path)
             except:
-                # Fallback for WebP or other formats fitz might not handle directly
                 img = Image.open(img_path).convert("RGB")
                 img_byte_arr = BytesIO()
                 img.save(img_byte_arr, format='JPEG')
                 img_doc = fitz.open("jpeg", img_byte_arr.getvalue())
 
-            # Convert image to PDF bytes
             pdfbytes = img_doc.convert_to_pdf()
             img_doc.close()
-            # Open the PDF bytes as a new document and insert into main doc
             img_pdf = fitz.open("pdf", pdfbytes)
             doc.insert_pdf(img_pdf)
             img_pdf.close()
@@ -553,7 +609,7 @@ async def download_manga_as_pdf(code, site="net", progress_callback=None):
     doc.save(pdf_path)
     doc.close()
 
-    # -------- CLEANUP -------- #
+    # -------- CLEANUP FOLDER -------- #
     try:
         shutil.rmtree(folder)
     except:
@@ -569,21 +625,35 @@ async def handle_download(client: Client, callback: CallbackQuery):
     pdf_path, msg, sent_msg = None, None, None
 
     try:
+        await callback.answer("📥 Starting download...")
         chat_id = callback.message.chat.id if callback.message else callback.from_user.id
 
+        # Remove the download pdf button message after being clicked
         if callback.message:
-            msg = await callback.message.reply("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
-        else:
-            await callback.answer("📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
+            try:
+                await callback.message.delete()
+            except:
+                pass
+        elif callback.inline_message_id:
+            try:
+                await client.edit_inline_reply_markup(callback.inline_message_id, reply_markup=None)
+            except:
+                pass
 
+        msg = await client.send_message(chat_id, "📥 Sᴛᴀʀᴛɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ...")
+
+        last_edit_time = 0
         async def progress(cur, total, stage):
-            percent = int((cur / total) * 100)
+            nonlocal last_edit_time
+            now = time()
+            percent = int((cur / total) * 100) if total else 0
+            if percent < 100 and (now - last_edit_time) < 1.5:
+                return
+            last_edit_time = now
             txt = f"{stage}... {percent}%"
             try:
                 if msg:
                     await msg.edit(txt)
-                else:
-                    await callback.edit_message_text(txt)
             except:
                 pass
 
@@ -594,9 +664,10 @@ async def handle_download(client: Client, callback: CallbackQuery):
         pdf_path = await download_manga_as_pdf(code, site, dl_progress)
 
         if msg:
-            await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
-        else:
-            await callback.edit_message_text("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
+            try:
+                await msg.edit("📤 Uᴘʟᴏᴀᴅɪɴɢ PDF... 0%")
+            except:
+                pass
 
         # Upload with progress
         async def upload_progress(cur, total):
@@ -619,25 +690,26 @@ async def handle_download(client: Client, callback: CallbackQuery):
             )
 
         # Copy uploaded message to channel (no second upload)
-        try:
-            await client.copy_message(
-                chat_id=LOG_CHANNEL,
-                from_chat_id=chat_id,
-                message_id=sent_msg.id
-            )
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await client.copy_message(
-                chat_id=LOG_CHANNEL,
-                from_chat_id=chat_id,
-                message_id=sent_msg.id
-            )
+        if LOG_CHANNEL:
+            try:
+                await client.copy_message(
+                    chat_id=LOG_CHANNEL,
+                    from_chat_id=chat_id,
+                    message_id=sent_msg.id
+                )
+            except FloodWait as e:
+                await asyncio.sleep(e.value)
+                await client.copy_message(
+                    chat_id=LOG_CHANNEL,
+                    from_chat_id=chat_id,
+                    message_id=sent_msg.id
+                )
+            except:
+                pass
 
         if msg:
-            await msg.delete()
-        elif callback.message:
             try:
-                await callback.message.delete()
+                await msg.delete()
             except:
                 pass
 
@@ -647,12 +719,15 @@ async def handle_download(client: Client, callback: CallbackQuery):
             if msg:
                 await msg.edit(err)
             else:
-                await callback.edit_message_text(err)
+                await client.send_message(chat_id, err)
         except:
             pass
     finally:
         if pdf_path and os.path.exists(pdf_path):
-            os.remove(pdf_path)
+            try:
+                os.remove(pdf_path)
+            except:
+                pass
 
 # ---------------- UPDATE CMD ---------------- #
 @app.on_message(filters.command("update") & filters.user(OWNER_ID))
