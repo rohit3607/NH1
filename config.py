@@ -6,21 +6,29 @@ from logging.handlers import RotatingFileHandler
 #rohit_1888 on Tg
 #--------------------------------------------
 #Bot token @Botfather
-TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "8226822628:AAGSRna0H7xRtEylXx-nTweEo0bqhwcZfp0")
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "8652781283:AAEAGbv4C97qmQP0Ta7bJL_5PFkAgT4vlmk")
 APP_ID = int(os.environ.get("APP_ID", "22469064")) #Your API ID from my.telegram.org
 API_HASH = os.environ.get("API_HASH", "c05481978a217fdb11fa6774b15cba32") #Your API Hash from my.telegram.org
 #--------------------------------------------
+
 OWNER_ID = int(os.environ.get("OWNER_ID", "7955996369")) # Owner id
 #--------------------------------------------
-PORT = os.environ.get("PORT", "8010")
+PORT = os.environ.get("PORT", "8019")
 #--------------------------------------------
 DB_URI = os.environ.get("DATABASE_URL", "mongodb+srv://YatoPro:ProYato@cluster0.zeaqrcy.mongodb.net/?retryWrites=true&w=majority")
 DB_NAME = os.environ.get("DATABASE_NAME", "Cluooo")
+
 TG_BOT_WORKERS = int(os.environ.get("TG_BOT_WORKERS", "200"))
 #--------------------------------------------
 START_PIC = os.environ.get("START_PIC", "https://telegra.ph/file/ec17880d61180d3312d6a.jpg")
+
+#--------------------------------------------
 #--------------------------------------------
 START_MSG = os.environ.get("START_MESSAGE", "<b>ʜᴇʟʟᴏ {mention}\n\n<blockquote> ɪ ᴀᴍ ʜ-ᴍᴀɴɢᴀ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ ʙᴏᴛ.</blockquote></b>")
+
+#--------------------------------------------
+LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "-1003234011283")) # STORE EVERY DOWNLOAD FILE
+
 #--------------------------------------------
 
 LOG_FILE_NAME = "postgenbot.txt"
@@ -43,4 +51,3 @@ logging.getLogger("pyrogram").setLevel(logging.WARNING)
 
 def LOGGER(name: str) -> logging.Logger:
     return logging.getLogger(name)
-   
