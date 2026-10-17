@@ -1,5 +1,6 @@
-https://codeload.github.com/KurimuzonAkuma/pyrogram/zip/refs/heads/dev
-#pyrofork==2.3.61
+
+pyrofork==2.3.61
+#pyrogram
 TgCrypto
 pyromod==1.5
 # --- For-Database ------------ #
@@ -12,15 +13,18 @@ python-dotenv
 # --- For-Web-Response ------- #
 pytz
 requests
-tqdm
 bs4
 pillow
 aiofiles
 asyncio
-reportlab
-playwright 
-beautifulsoup4
-cloudscraper
-undetected-chromedriver
-selenium
+faster-whisper
+aiohttp
+ffmpeg-python
+fonttools
+argostranslate
 PyMuPDF
+Pillow
+opencv-python-headless
+numpy
+pytesseract
+deep-translator
