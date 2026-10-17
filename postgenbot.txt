@@ -1,3 +1,0 @@
-[17-Oct-26 15:51:38 - WARNING] - pyrogram.types.input_message_content.input_text_message_content - This property is deprecated. Please use link_preview_options instead
-[17-Oct-26 15:51:38 - WARNING] - pyrogram.types.input_message_content.input_text_message_content - This property is deprecated. Please use link_preview_options instead
-[17-Oct-26 15:51:38 - WARNING] - pyrogram.types.input_message_content.input_text_message_content - This property is deprecated. Please use link_preview_options instead
