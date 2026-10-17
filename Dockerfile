@@ -3,8 +3,7 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8019 \
-    MAX_CONCURRENT_TASKS=3
+    PORT=8019
 
 # Set working directory
 WORKDIR /app

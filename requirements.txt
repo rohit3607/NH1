@@ -1,4 +1,4 @@
-
+#https://codeload.github.com/KurimuzonAkuma/pyrogram/zip/refs/heads/dev
 pyrofork==2.3.61
 #pyrogram
 TgCrypto
@@ -13,8 +13,15 @@ python-dotenv
 # --- For-Web-Response ------- #
 pytz
 requests
+tqdm
 bs4
 pillow
 aiofiles
 asyncio
-faster-whisper
+reportlab
+playwright 
+beautifulsoup4
+cloudscraper
+undetected-chromedriver
+selenium
+PyMuPDF
